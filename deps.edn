@@ -1,0 +1,21 @@
+{:paths ["src/shared" "resources"]
+
+ :deps
+ {org.clojure/clojure
+  {:mvn/version "1.12.0"}}
+
+ :aliases
+ {:server
+  {:extra-paths ["src/server"]
+   :main-opts ["=m" "torosalto.server"]}
+
+  :cljs
+  {:extra-paths ["src/client"]
+   :extra-deps
+   {org.clojure/clojurescript
+    {:mvn/version "1.12.134"}
+    thheller/shadow-cljs
+    {:mvn/version "3.5.0"}}}
+  
+  :main-opts ["-m" "shadow.cljs.devtools.cli"]}}
+

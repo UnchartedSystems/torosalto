@@ -1,0 +1,22 @@
+{:deps true
+
+ :dev-http
+ {8080 "resources/public"}
+
+ ;; :nrepl
+ ;; {:middleware [cider.nrepl/cider-middleware]}
+
+  :builds
+ {:app
+  {:target :browser
+   :output-dir "resources/public/js"
+   :asset-path "/js"
+   :release {:output-dir "dist/js"}
+
+   :devtools
+   {:watch-dir "resources/public"
+    :watch-exts #{"css"}}
+   
+   :modules
+   {:main
+    {:init-fn torosalto.core/init!}}}}}
