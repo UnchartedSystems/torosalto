@@ -50,9 +50,8 @@
     [[9 7] :red] [[0 8] :red] [[8 6] :red] [[7 5] :red] [[6 4] :red]
     [[0 4] :blue] [[1 3] :blue] [[2 2] :blue] [[3 1] :blue] [[4 0] :blue]]))
 
-
-
 ;;;; Utilities
+
 (defn v+ [a b] (mapv + a b))
 (defn v* [n v] (mapv #(* n %) v))
 
@@ -119,10 +118,6 @@
     (->> (mapv #(scan-line board coords % team) line-dirs)
          (reduce max 0)
          (<= 5))))
-
-(win? test-board [9 8] :blue)
-
-(win? test-board [7 9] :red)
 
 ;;;; Display
 
