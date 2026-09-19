@@ -50,6 +50,11 @@
     [[9 7] :red] [[0 8] :red] [[8 6] :red] [[7 5] :red] [[6 4] :red]
     [[0 4] :blue] [[1 3] :blue] [[2 2] :blue] [[3 1] :blue] [[4 0] :blue]]))
 
+(def game
+  {:player :red
+   :prison {:red 0 :blue 0}
+   :board test-board})
+
 ;;;; Utilities
 
 (defn v+ [a b] (mapv + a b))
@@ -75,7 +80,7 @@
            (mapv #(vector % (get-in board (move coords %)))
                  adjacencies)))
 
-;;;; Legal Rules
+;;;; Legality Checks
 
 (defn legal-position? [[x y]]
   (and (<= 0 x) (< x board-size)
@@ -99,6 +104,58 @@
          (not (stones (get-in board (move coords (v* 2 direction)))))
          (stones (get-in board (move coords direction)))))))
 
+;;;; Moves
+
+(defn place! [{:keys [player board] :as game} coords]
+  (assoc game
+         :board (assoc-in board coords player)))
+
+(defn free! [{:keys [player prison board] :as game} coords-1 coords-2]
+  (assoc game
+         :prison (update prison player #(- % 2))
+         :board (-> board
+                    (assoc-in coords-1 player)
+                    (assoc-in coords-2 player))))
+
+
+;; Performs a single hop without checks and returns an updated game.
+;; We may need a flag to note when this is a single hop that blocks!
+(defn hop!
+  ([{:keys [prison board] :as game} coords direction]
+   (hop! game coords direction false))
+  ([{:keys [prison board] :as game} coords direction blocked?]
+   (let [hopped-over (move coords direction)
+         hopped-to (move coords (v* 2 direction))
+         attacker (get-in board coords)
+         captured (get-in board hopped-over)]
+     (assoc game
+            :prison (update prison captured inc)
+            :board (-> board
+                       (assoc-in coords :empty)
+                       (assoc-in hopped-over (if blocked? :blocked :empty))
+                       (assoc-in hopped-to attacker))))))
+
+
+
+;;;; Direction Refactor?
+;; Compass Headings:
+[:n :ne :e :se :s :sw :w :nw]
+;; Deltas:
+[[1 0] [1 1] [0 1] [-1 1] [-1 0] [-1 -1] [0 -1] [1 -1]]
+
+;;;; Full Hops
+;; Sequence of Directions as input?
+;; This allows:
+;; - Checking all directions match constraint
+;; - Checking single vs multihops.
+
+;;;; Display Backgrounds
+;; Good background text colors?
+
+
+
+
+;;;; Win Condition
 
 (defn- scan-line [board coords direction team]
   (->> (mapv #(v* % direction) (range -4 5))
@@ -128,7 +185,7 @@
   (subs " A B C D E F G H I J K L M N O P Q R S T U V W X Y Z"
         0 (* columns 2)))
 
-(defn display [board]
+(defn show-board [board]
   (let [nums (num-guides board-size)]
     (doseq [x (reverse (range board-size))]
       (print (get nums x))
@@ -142,10 +199,26 @@
       (println)))
   (println " " (letter-guides board-size)))
 
-(doall
- (println)
- (display test-board))
+(defn show-game [{:keys [player prison board] :as game}]
+  (let [red (format "%2d" (:red prison))
+        blue (format "%2d" (:blue prison))]
+    (println)
+    (println
+     (str
+      "Turn:"
+      (case player
+        :red  "\u001b[31m Red \u001b[0m"
+        :blue "\u001b[34m Blue\u001b[0m")
+      "     "
+      "\u001b[31m " red "\u001b[0m |\u001b[34m" blue "\u001b[0m")))
+  (show-board board)
+  game)
 
-(doall
- (println)
- (display win-test-board))
+
+#_(-> (show-game game)
+      (hop! [8 8] [0 1])
+      (show-game)
+      (hop! [8 0] [-1 0])
+      (show-game)
+      (hop! [6 0] [0 -1])
+      (show-game))

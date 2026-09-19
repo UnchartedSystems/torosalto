@@ -1,4 +1,4 @@
-{:paths ["src/shared" "resources"]
+{:paths ["src/shared" "src/server" "resources"]
 
  :deps
  {org.clojure/clojure
