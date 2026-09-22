@@ -80,6 +80,11 @@
            (mapv #(vector % (get-in board (move coords %)))
                  adjacencies)))
 
+(defn get-constraint [direction]
+  (cond (diagonal direction)   diagonal
+        (orthogonal direction) orthogonal
+        :else false))
+
 ;;;; Legality Checks
 
 (defn legal-position? [[x y]]
@@ -90,9 +95,25 @@
   (and (legal-position? coords)
        (= :empty (get-in board coords))))
 
+(defn place [{:keys [player board] :as game} coords]
+  (assoc game
+         :board (assoc-in board coords player)))
+
 (defn place-open? [board coords]
   (and (place? board coords)
        (empty? (adj-stones board coords))))
+
+(defn free? [{:keys [player prison board] :as game} coords-1 coords-2]
+  (boolean
+   (and (<= 2 (get prison player))
+        (when (place-open? board coords-1)
+          ()))))
+
+(defn free [{:keys [player prison board] :as game} coords-1 coords-2]
+  (-> game
+      (update-in [:prison player] - 2)
+      (place coords-1)
+      (place coords-2)))
 
 (defn hop?
   ([board coords direction]
@@ -104,44 +125,58 @@
          (not (stones (get-in board (move coords (v* 2 direction)))))
          (stones (get-in board (move coords direction)))))))
 
-;;;; Moves
-
-(defn place! [{:keys [player board] :as game} coords]
-  (assoc game
-         :board (assoc-in board coords player)))
-
-(defn free! [{:keys [player prison board] :as game} coords-1 coords-2]
-  (assoc game
-         :prison (update prison player #(- % 2))
-         :board (-> board
-                    (assoc-in coords-1 player)
-                    (assoc-in coords-2 player))))
-
-
-;; Performs a single hop without checks and returns an updated game.
-;; We may need a flag to note when this is a single hop that blocks!
-(defn hop!
-  ([{:keys [prison board] :as game} coords direction]
-   (hop! game coords direction false))
+(defn hop
+  ([game coords direction]
+   (hop game coords direction false))
   ([{:keys [prison board] :as game} coords direction blocked?]
    (let [hopped-over (move coords direction)
          hopped-to (move coords (v* 2 direction))
          attacker (get-in board coords)
          captured (get-in board hopped-over)]
-     (assoc game
-            :prison (update prison captured inc)
-            :board (-> board
-                       (assoc-in coords :empty)
-                       (assoc-in hopped-over (if blocked? :blocked :empty))
-                       (assoc-in hopped-to attacker))))))
+     {:coords hopped-to
+      :game (assoc game
+                   :prison (update prison captured inc)
+                   :board (-> board
+                              (assoc-in coords :empty)
+                              (assoc-in hopped-over (if blocked? :blocked :empty))
+                              (assoc-in hopped-to attacker)))})))
+
+(defn hops? [{:keys [prison board] :as game} coords directions]
+  (let [constraint (get-constraint (first directions))]
+    (boolean
+     (when (and constraint (not (empty? directions)))
+       (reduce
+        (fn [{:keys [coords game]} direction]
+          (if (hop? (:board game) coords direction constraint)
+            (hop game coords direction)
+            (reduced false)))
+        {:coords coords
+         :game game}
+        directions)))))
+
+(defn hops [{:keys [prison board] :as game} coords directions]
+  ())
+
+(show-game game)
+(free? game [0 0] [8 0])
+
+#_(-> (show-game game)
+      (hop! [8 8] [0 1])
+      (show-game)
+      (hop! [8 0] [-1 0])
+      (show-game)
+      (hop! [6 0] [0 -1])
+      (show-game))
+
+(hops? game [8 8] [[0 1] [-1 0] [-1 -1]])
 
 
 
 ;;;; Direction Refactor?
 ;; Compass Headings:
-[:n :ne :e :se :s :sw :w :nw]
+#_[:n :ne :e :se :s :sw :w :nw]
 ;; Deltas:
-[[1 0] [1 1] [0 1] [-1 1] [-1 0] [-1 -1] [0 -1] [1 -1]]
+#_[[1 0] [1 1] [0 1] [-1 1] [-1 0] [-1 -1] [0 -1] [1 -1]]
 
 ;;;; Full Hops
 ;; Sequence of Directions as input?
@@ -149,8 +184,14 @@
 ;; - Checking all directions match constraint
 ;; - Checking single vs multihops.
 
+;;;; Turn structure
+;; Where should turn be managed and change?
+;; What am I actually building? Validation for CLJ & CLJS? CLJ CLI interaction? CLJS interaction? All?
+
 ;;;; Display Backgrounds
 ;; Good background text colors?
+;; Should I compare turns to last turns and highlight differences?
+;; Iteration over all options of a turn move and highlighting them?
 
 
 
