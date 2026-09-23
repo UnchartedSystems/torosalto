@@ -50,6 +50,11 @@
     [[9 7] :red] [[0 8] :red] [[8 6] :red] [[7 5] :red] [[6 4] :red]
     [[0 4] :blue] [[1 3] :blue] [[2 2] :blue] [[3 1] :blue] [[4 0] :blue]]))
 
+(def new-game
+  {:player :red
+   :prison {:red 0 :blue 0}
+   :board empty-board})
+
 (def game
   {:player :red
    :prison {:red 0 :blue 0}
@@ -68,12 +73,18 @@
   (let [[letter num] [(subs coords 0 1) (subs coords 1)]]
     [(get letter->y letter) (dec num)]))
 
+;; Will need to be changed to take in a board size
 (defn wrap [[x y]]
   [(mod x board-size)
    (mod y board-size)])
 
 (defn move [coords delta]
   (wrap (v+ coords delta)))
+
+(defn adjacent? [coords-1 coords-2]
+  (boolean
+   (some #(= coords-1 %)
+         (mapv #(move coords-2 %) adjacencies))))
 
 (defn adj-stones [board coords]
   (filterv #(stones (second %))
@@ -106,8 +117,10 @@
 (defn free? [{:keys [player prison board] :as game} coords-1 coords-2]
   (boolean
    (and (<= 2 (get prison player))
-        (when (place-open? board coords-1)
-          ()))))
+        (not= coords-1 coords-2)
+        (not (adjacent? coords-1 coords-2))
+        (place-open? board coords-1)
+        (place-open? board coords-2))))
 
 (defn free [{:keys [player prison board] :as game} coords-1 coords-2]
   (-> game
