@@ -71,7 +71,7 @@
 ;; TODO capitalize letter
 (defn interp-coords [coords]
   (let [[letter num] [(subs coords 0 1) (subs coords 1)]]
-    [(get letter->y letter) (dec num)]))
+    [(get letter->y letter) (dec (parse-long num))]))
 
 ;; Will need to be changed to take in a board size
 (defn wrap [[x y]]
@@ -99,10 +99,11 @@
 ;;;; Legality Checks
 
 (defn legal-position? [[x y]]
-  (and (<= 0 x) (< x board-size)
+  (and (int? x) (int? y)
+       (<= 0 x) (< x board-size)
        (<= 0 y) (< y board-size)))
 
-(defn place? [board coords]
+(defn place? [{:keys [board]} coords]
   (and (legal-position? coords)
        (= :empty (get-in board coords))))
 
@@ -110,8 +111,8 @@
   (assoc game
          :board (assoc-in board coords player)))
 
-(defn place-open? [board coords]
-  (and (place? board coords)
+(defn place-open? [{:keys [board] :as game} coords]
+  (and (place? game coords)
        (empty? (adj-stones board coords))))
 
 (defn free? [{:keys [player prison board] :as game} coords-1 coords-2]
@@ -119,8 +120,8 @@
    (and (<= 2 (get prison player))
         (not= coords-1 coords-2)
         (not (adjacent? coords-1 coords-2))
-        (place-open? board coords-1)
-        (place-open? board coords-2))))
+        (place-open? game coords-1)
+        (place-open? game coords-2))))
 
 (defn free [{:keys [player prison board] :as game} coords-1 coords-2]
   (-> game
@@ -129,15 +130,17 @@
       (place coords-2)))
 
 (defn hop?
-  ([board coords direction]
-   (hop? board coords direction adjacencies))
-  ([board coords direction constraint]
+  ([game coords direction]
+   (hop? game coords direction adjacencies))
+  ([{:keys [player board]} coords direction constraint]
    (boolean
-    (and (legal-position? coords)
+    (and (= player (get-in board coords))
+         (legal-position? coords)
          (constraint direction)
          (not (stones (get-in board (move coords (v* 2 direction)))))
          (stones (get-in board (move coords direction)))))))
 
+;; Either here or hops, need to check player against coords stone
 (defn hop
   ([game coords direction]
    (hop game coords direction false))
@@ -160,28 +163,22 @@
      (when (and constraint (not (empty? directions)))
        (reduce
         (fn [{:keys [coords game]} direction]
-          (if (hop? (:board game) coords direction constraint)
+          (if (hop? game coords direction constraint)
             (hop game coords direction)
             (reduced false)))
         {:coords coords
          :game game}
         directions)))))
 
+;; hops & hops? replicate work traversing series of hops.
 (defn hops [{:keys [prison board] :as game} coords directions]
-  ())
-
-(show-game game)
-(free? game [0 0] [8 0])
-
-#_(-> (show-game game)
-      (hop! [8 8] [0 1])
-      (show-game)
-      (hop! [8 0] [-1 0])
-      (show-game)
-      (hop! [6 0] [0 -1])
-      (show-game))
-
-(hops? game [8 8] [[0 1] [-1 0] [-1 -1]])
+  (let [blocked? (= 1 (count directions))]
+    (:game
+     (reduce (fn [{:keys [game coords]} direction]
+               (hop game coords direction blocked?))
+             {:coords coords
+              :game game}
+             directions))))
 
 
 
@@ -224,6 +221,7 @@
 
 ;; Sloppy but works: adj-stones wraps.
 ;; Plenty of redundant work.
+;; When will win be checked? A player can win by hopping (specially on an odd board)
 (defn win? [board coords team]
   (let [line-dirs (mapv first (filterv #(= (second %) team) (adj-stones board coords)))]
     (->> (mapv #(scan-line board coords % team) line-dirs)
@@ -267,12 +265,3 @@
       "\u001b[31m " red "\u001b[0m |\u001b[34m" blue "\u001b[0m")))
   (show-board board)
   game)
-
-
-#_(-> (show-game game)
-      (hop! [8 8] [0 1])
-      (show-game)
-      (hop! [8 0] [-1 0])
-      (show-game)
-      (hop! [6 0] [0 -1])
-      (show-game))
