@@ -19,46 +19,52 @@
 
 ;;;; Board Creation
 
-(def board-size 10)
-
-(def empty-board
-  (vec (repeat board-size (vec (repeat board-size :empty)))))
-
-(defn make-board [board cells]
+(defn- populate-board [{:keys [board] :as game} cells]
   (if (empty? cells)
-    board
-    (let [[coords state] (first cells)
-          cells (rest cells)]
+    game
+    (let [[[y x] state] (first cells)]
       (recur
-       (assoc-in board coords state)
-       cells))))
+       (assoc-in game [:board y x] state)
+       (rest cells)))))
 
-(def test-board
-  (make-board
-   empty-board
-   [[[3 5] :red] [[3 3] :red] [[2 6] :blue] [[2 5] :red]
-    [[2 3] :red] [[1 4] :red] [[5 5] :red] [[8 8] :blue]
-    [[8 7] :red] [[7 8] :red] [[9 8] :blue] [[7 8] :blue]
-    [[8 9] :red] [[6 9] :red] [[5 9] :blue] [[9 9] :red]
-    [[1 1] :red] [[7 0] :red] [[9 2] :red] [[5 4] :blue]
-    [[5 3] :blue] [[0 8] :blue] [[6 8] :blocked] [[4 0] :blocked]]))
+(defn make-game
+  ([] (make-game {}))
+  ([{:keys [size player prison board]}]
+   (let [size (or size 10)
+         empty-board (vec (repeat size (vec (repeat size :empty))))
+         game        {:size size
+                      :player (or player :red)
+                      :prison (or prison {:red 0 :blue 0})
+                      :board empty-board}]
+     (if board
+       (populate-board game board)
+       game))))
 
-(def win-test-board
-  (make-board
-   empty-board
-   [[[4 4] :red] [[4 3] :red] [[4 2] :red] [[4 5] :blue] [[4 6] :red]
-    [[9 7] :red] [[0 8] :red] [[8 6] :red] [[7 5] :red] [[6 4] :red]
-    [[0 4] :blue] [[1 3] :blue] [[2 2] :blue] [[3 1] :blue] [[4 0] :blue]]))
+(make-game)
 
 (def new-game
-  {:player :red
-   :prison {:red 0 :blue 0}
-   :board empty-board})
+  (make-game))
 
-(def game
-  {:player :red
-   :prison {:red 0 :blue 0}
-   :board test-board})
+(def small-game
+  (make-game
+   {:size 8}))
+
+(def test-game
+  (make-game
+   {:board
+    [[[3 5] :red] [[3 3] :red] [[2 6] :blue] [[2 5] :red]
+     [[2 3] :red] [[1 4] :red] [[5 5] :red] [[8 8] :blue]
+     [[8 7] :red] [[7 8] :red] [[9 8] :blue] [[7 8] :blue]
+     [[8 9] :red] [[6 9] :red] [[5 9] :blue] [[9 9] :red]
+     [[1 1] :red] [[7 0] :red] [[9 2] :red] [[5 4] :blue]
+     [[5 3] :blue] [[0 8] :blue] [[6 8] :blocked] [[4 0] :blocked]]}))
+
+(def win-game
+  (make-game
+   {:board
+    [[[4 4] :red] [[4 3] :red] [[4 2] :red] [[4 5] :blue] [[4 6] :red]
+     [[9 7] :red] [[0 8] :red] [[8 6] :red] [[7 5] :red] [[6 4] :red]
+     [[0 4] :blue] [[1 3] :blue] [[2 2] :blue] [[3 1] :blue] [[4 0] :blue]]}))
 
 ;;;; Utilities
 
@@ -66,7 +72,9 @@
 (defn v* [n v] (mapv #(* n %) v))
 
 (def letter->y
-  {"A" 0 "B" 1 "C" 2 "D" 3 "E" 4 "F" 5 "G" 6 "H" 7 "I" 8 "J" 9})
+  {"A" 0 "B" 1 "C" 2 "D" 3 "E" 4 "F" 5 "G" 6 "H" 7 "I" 8 "J" 9
+   "K" 10 "L" 11 "M" 12 "N" 13 "O" 14 "P" 15 "Q" 16 "R" 17
+   "S" 18 "T" 19 "U" 20 "V" 21 "W" 22 "X" 23 "Y" 24 "Z" 25})
 
 ;; TODO capitalize letter
 (defn interp-coords [coords]
@@ -74,21 +82,24 @@
     [(get letter->y letter) (dec (parse-long num))]))
 
 ;; Will need to be changed to take in a board size
-(defn wrap [[x y]]
-  [(mod x board-size)
-   (mod y board-size)])
+(defn wrap [[x y] size]
+  [(mod x size)
+   (mod y size)])
 
-(defn move [coords delta]
-  (wrap (v+ coords delta)))
+;; MARK
+(defn move [coords delta size]
+  (wrap (v+ coords delta) size))
 
-(defn adjacent? [coords-1 coords-2]
+;; MARK
+(defn adjacent? [coords-1 coords-2 size]
   (boolean
    (some #(= coords-1 %)
-         (mapv #(move coords-2 %) adjacencies))))
+         (mapv #(move coords-2 % size) adjacencies))))
 
-(defn adj-stones [board coords]
+;; MARK
+(defn adj-stones [board coords size]
   (filterv #(stones (second %))
-           (mapv #(vector % (get-in board (move coords %)))
+           (mapv #(vector % (get-in board (move coords % size)))
                  adjacencies)))
 
 (defn get-constraint [direction]
@@ -98,28 +109,28 @@
 
 ;;;; Legality Checks
 
-(defn legal-position? [[x y]]
+(defn legal-position? [[x y] size]
   (and (int? x) (int? y)
-       (<= 0 x) (< x board-size)
-       (<= 0 y) (< y board-size)))
+       (<= 0 x) (< x size)
+       (<= 0 y) (< y size)))
 
-(defn place? [{:keys [board]} coords]
-  (and (legal-position? coords)
+(defn place? [{:keys [size board]} coords]
+  (and (legal-position? coords size)
        (= :empty (get-in board coords))))
 
 (defn place [{:keys [player board] :as game} coords]
   (assoc game
          :board (assoc-in board coords player)))
 
-(defn place-open? [{:keys [board] :as game} coords]
+(defn place-open? [{:keys [size board] :as game} coords]
   (and (place? game coords)
-       (empty? (adj-stones board coords))))
+       (empty? (adj-stones board coords size))))
 
-(defn free? [{:keys [player prison board] :as game} coords-1 coords-2]
+(defn free? [{:keys [size player prison board] :as game} coords-1 coords-2]
   (boolean
    (and (<= 2 (get prison player))
         (not= coords-1 coords-2)
-        (not (adjacent? coords-1 coords-2))
+        (not (adjacent? coords-1 coords-2 size))
         (place-open? game coords-1)
         (place-open? game coords-2))))
 
@@ -132,21 +143,21 @@
 (defn hop?
   ([game coords direction]
    (hop? game coords direction adjacencies))
-  ([{:keys [player board]} coords direction constraint]
+  ([{:keys [size player board]} coords direction constraint]
    (boolean
     (and (= player (get-in board coords))
-         (legal-position? coords)
+         (legal-position? coords size)
          (constraint direction)
-         (not (stones (get-in board (move coords (v* 2 direction)))))
-         (stones (get-in board (move coords direction)))))))
+         (not (stones (get-in board (move coords (v* 2 direction) size))))
+         (stones (get-in board (move coords direction size)))))))
 
 ;; Either here or hops, need to check player against coords stone
 (defn hop
   ([game coords direction]
    (hop game coords direction false))
-  ([{:keys [prison board] :as game} coords direction blocked?]
-   (let [hopped-over (move coords direction)
-         hopped-to (move coords (v* 2 direction))
+  ([{:keys [size prison board] :as game} coords direction blocked?]
+   (let [hopped-over (move coords direction size)
+         hopped-to (move coords (v* 2 direction) size)
          attacker (get-in board coords)
          captured (get-in board hopped-over)]
      {:coords hopped-to
@@ -180,38 +191,12 @@
               :game game}
              directions))))
 
-
-
-;;;; Direction Refactor?
-;; Compass Headings:
-#_[:n :ne :e :se :s :sw :w :nw]
-;; Deltas:
-#_[[1 0] [1 1] [0 1] [-1 1] [-1 0] [-1 -1] [0 -1] [1 -1]]
-
-;;;; Full Hops
-;; Sequence of Directions as input?
-;; This allows:
-;; - Checking all directions match constraint
-;; - Checking single vs multihops.
-
-;;;; Turn structure
-;; Where should turn be managed and change?
-;; What am I actually building? Validation for CLJ & CLJS? CLJ CLI interaction? CLJS interaction? All?
-
-;;;; Display Backgrounds
-;; Good background text colors?
-;; Should I compare turns to last turns and highlight differences?
-;; Iteration over all options of a turn move and highlighting them?
-
-
-
-
 ;;;; Win Condition
 
-(defn- scan-line [board coords direction team]
+(defn- scan-line [size board coords direction team]
   (->> (mapv #(v* % direction) (range -4 5))
        (mapv #(v+ coords %))
-       (filterv #(legal-position? %))
+       (filterv #(legal-position? % size))
        (mapv #(get-in board %))
        (mapv #(= team %))
        (partition-by identity)
@@ -222,11 +207,30 @@
 ;; Sloppy but works: adj-stones wraps.
 ;; Plenty of redundant work.
 ;; When will win be checked? A player can win by hopping (specially on an odd board)
-(defn win? [board coords team]
-  (let [line-dirs (mapv first (filterv #(= (second %) team) (adj-stones board coords)))]
+(defn win? [size board coords team]
+  (let [line-dirs (mapv first (filterv #(= (second %) team) (adj-stones board coords size)))]
     (->> (mapv #(scan-line board coords % team) line-dirs)
          (reduce max 0)
          (<= 5))))
+
+;;;; Turn structure
+;; Where should turn be managed and change?
+;; What am I actually building? Validation for CLJ & CLJS? CLJ CLI interaction? CLJS interaction? All?
+
+;;;; Display Backgrounds
+;; Good background text colors?
+;; Should I compare turns to last turns and highlight differences?
+;; Iteration over all options of a turn move and highlighting them?
+
+;;;; Turns
+
+;; Turn instructions should be encoded as data from the website & CLI
+;; Each chrome will use helpers to create interactive turn systems
+;; The output from these interactive systems will be data that gets processed here.
+;; Interactive turn systems should send a hash along with the initial game and turns
+;; At the end after processing moves, hashes will be compared.
+;; It's an API: down the road I'll add error feedback.
+
 
 ;;;; Display
 
@@ -237,11 +241,11 @@
   (subs " A B C D E F G H I J K L M N O P Q R S T U V W X Y Z"
         0 (* columns 2)))
 
-(defn show-board [board]
-  (let [nums (num-guides board-size)]
-    (doseq [x (reverse (range board-size))]
+(defn show-board [board size]
+  (let [nums (num-guides size)]
+    (doseq [x (reverse (range size))]
       (print (get nums x))
-      (doseq [y (range board-size)]
+      (doseq [y (range size)]
         (print 
          (case (get-in board [x y])
            :empty   " ·"
@@ -249,9 +253,9 @@
            :blue    "\u001b[34m ◉\u001b[0m"
            :blocked " ×")))
       (println)))
-  (println " " (letter-guides board-size)))
+  (println " " (letter-guides size)))
 
-(defn show-game [{:keys [player prison board] :as game}]
+(defn show-game [{:keys [size player prison board] :as game}]
   (let [red (format "%2d" (:red prison))
         blue (format "%2d" (:blue prison))]
     (println)
@@ -263,5 +267,6 @@
         :blue "\u001b[34m Blue\u001b[0m")
       "     "
       "\u001b[31m " red "\u001b[0m |\u001b[34m" blue "\u001b[0m")))
-  (show-board board)
+  (show-board board size)
   game)
+
