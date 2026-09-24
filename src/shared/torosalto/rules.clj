@@ -184,12 +184,11 @@
 ;; hops & hops? replicate work traversing series of hops.
 (defn hops [{:keys [prison board] :as game} coords directions]
   (let [blocked? (= 1 (count directions))]
-    (:game
-     (reduce (fn [{:keys [game coords]} direction]
-               (hop game coords direction blocked?))
-             {:coords coords
-              :game game}
-             directions))))
+    (reduce (fn [{:keys [game coords]} direction]
+              (hop game coords direction blocked?))
+            {:coords coords
+             :game game}
+            directions)))
 
 ;;;; Win Condition
 
@@ -272,30 +271,62 @@
 (def hop-data
   {:move :hop
    :player :red
-   :details {:coords [1 2]
-             :directions [[0 1] [1 0] [0 1] [-1 0]]
-             :place-coords [4 2]}
+   :details {:coords [9 9]
+             :directions [[0 -1] [-1 0] [0 1]]
+             :place-coords [4 1]}
    :version 0})
 
-(defn place-move [{:keys [player] :as game} coords]
-  (when (place? game coords)
+
+(defn get-game [id]
+  test-game)
+
+(def next-player
+  {:red :blue
+   :blue :red})
+
+(defn next-turn [game]
+  (-> game
+      (assoc-in [:player] #(% next-player))
+      (update-in [:turn] #(inc %))))
+
+
+(defn process-turn [{:keys [id move player details]}]
+  (let [game (get-game id)
+        game (if (:winner game)
+               false
+               (if (not= player (:player game))
+                 false
+                 (case move
+                   :place (place-move game details)
+                   :free (free-move game details)
+                   :hop (hop-move game details)
+                   false)))]
+    (next-turn game)))
+
+(defn place-move [{:keys [player] :as game} {:keys [coords]}]
+  (when (and coords (place? game coords))
     (let [upd-game (place game coords)]
       (if (win? upd-game coords)
         (win game)
         upd-game))))
 
-(defn free-move [game coords-1 coords-2]
-  (and (free? game coords-1 coords-2)
+(defn free-move [game {:keys [coords-1 coords-2]}]
+  (and (and coords-1 coords-2)
+       (free? game coords-1 coords-2)
        (free game coords-1 coords-2)))
 
-(defn hop-move [game coords directions plc-coords]
-  (when (hops? game coords directions)
-    (-> (hops game coords directions)
-        (#(when plc-coords
-            (and (place-open? % plc-coords)
-                 (place game % plc-coords))))
-        (#(if (win? % plc-coords)
-            (win game) game)))))
+(defn hop-move [game {:keys [ coords directions place-coords]}]
+  (when (and coords directions (hops? game coords directions))
+    (let [{:keys [game coords]} (hops game coords directions)]
+      (if (win? game coords)
+        (win game)
+        (if-not place-coords
+          game
+          (and  (place-open? game place-coords)
+                (place game place-coords)))))))
+
+
+
 
 ;;;; Common Checks
 ;; Game still going?
@@ -318,7 +349,6 @@
 ;; hops
 ;; if place
 ;; -> place-open?
-;; -> Can Open Place?
 ;; -> place
 ;; if win?
 ;; -> win
