@@ -29,10 +29,12 @@
 
 (defn make-game
   ([] (make-game {}))
-  ([{:keys [size player prison board]}]
+  ([{:keys [size turn player prison board]}]
    (let [size (or size 10)
          empty-board (vec (repeat size (vec (repeat size :empty))))
          game        {:size size
+                      :turn (or turn 0)
+                      :version "SNAPSHOT"
                       :player (or player :red)
                       :prison (or prison {:red 0 :blue 0})
                       :board empty-board}]
@@ -230,6 +232,28 @@
 ;; Interactive turn systems should send a hash along with the initial game and turns
 ;; At the end after processing moves, hashes will be compared.
 ;; It's an API: down the road I'll add error feedback.
+
+(def free-move
+  {:move :free
+   :details {:coords-1 [5 1]
+             :coords-2 [9 3]}
+   :hash (hash new-game)
+   :version "SNAPSHOT"})
+
+(def place-move
+  {:move :place
+   :details {:coords [4 2]}
+   :hash (hash new-game)
+   :version "SNAPSHOT"})
+
+(def hop-move
+  {:move :hop
+   :details {:coords [1 2]
+             :directions [[0 1] [1 0] [0 1] [-1 0]]
+             :place-coords [4 2]}
+   :hash (hash new-game)
+   :version "SNAPSHOT"})
+
 
 
 ;;;; Display
