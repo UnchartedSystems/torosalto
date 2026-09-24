@@ -34,7 +34,7 @@
          empty-board (vec (repeat size (vec (repeat size :empty))))
          game        {:size size
                       :turn (or turn 0)
-                      :version "SNAPSHOT"
+                      :version 0
                       :player (or player :red)
                       :prison (or prison {:red 0 :blue 0})
                       :board empty-board}]
@@ -152,7 +152,7 @@
          (stones (get-in board (move coords direction size)))))))
 
 ;; Either here or hops, need to check player against coords stone
-(defn hop
+(defn- hop
   ([game coords direction]
    (hop game coords direction false))
   ([{:keys [size prison board] :as game} coords direction blocked?]
@@ -193,12 +193,13 @@
 
 ;;;; Win Condition
 
-(defn- scan-line [size board coords direction team]
+;; TODO: refactor to end evaluation on first evaluated win
+(defn- scan-line [{:keys [player size board]} coords direction]
   (->> (mapv #(v* % direction) (range -4 5))
        (mapv #(v+ coords %))
        (filterv #(legal-position? % size))
        (mapv #(get-in board %))
-       (mapv #(= team %))
+       (mapv #(= player %))
        (partition-by identity)
        (filterv first)
        (mapv count)
@@ -207,11 +208,33 @@
 ;; Sloppy but works: adj-stones wraps.
 ;; Plenty of redundant work.
 ;; When will win be checked? A player can win by hopping (specially on an odd board)
-(defn win? [{:keys [size board] :as game} coords team]
-  (let [line-dirs (mapv first (filterv #(= (second %) team) (adj-stones game coords)))]
-    (->> (mapv #(scan-line board coords % team) line-dirs)
+(defn win? [{:keys [player size board] :as game} coords]
+  (let [line-dirs (mapv first (filterv #(= (second %) player) (adj-stones game coords)))]
+    (->> (mapv #(scan-line game coords %) line-dirs)
          (reduce max 0)
          (<= 5))))
+
+(defn win [{:keys [player] :as game}]
+  (assoc game :winner player))
+
+;;;; Iterating Over Cells
+
+(defn cell-mask [{:keys [size] :as game} f]
+  (vec (for [x (range size)]
+         (vec (for [y (range size)]
+                (f game [x y]))))))
+
+;; Open Place Mask
+#_(show-board
+ (cell-mask test-game #(if (place-open? %1 %2) :red :blue)) 10)
+
+;; Place Mask
+#_(show-board
+ (cell-mask test-game #(if (place? %1 %2) :red :blue)) 10)
+
+;; All Hop? Mask
+#_(show-board
+ (cell-mask test-game (fn [g c] (if (some identity (mapv #(hop? g c %) adjacencies)) :red :blue))) 10)
 
 ;;;; Turn structure
 ;; Where should turn be managed and change?
@@ -231,38 +254,64 @@
 ;; At the end after processing moves, hashes will be compared.
 ;; It's an API: down the road I'll add error feedback.
 
-(def free-move
+;; Need to consider how winning works, does the status message mention it? It should?
+
+(def free-data
   {:move :free
+   :player :red
    :details {:coords-1 [5 1]
              :coords-2 [9 3]}
-   :hash (hash new-game)
-   :version "SNAPSHOT"})
+   :version 0})
 
-(def place-move
+(def place-data
   {:move :place
+   :player :red
    :details {:coords [4 2]}
-   :hash (hash new-game)
-   :version "SNAPSHOT"})
+   :version 0})
 
-(def hop-move
+(def hop-data
   {:move :hop
+   :player :red
    :details {:coords [1 2]
              :directions [[0 1] [1 0] [0 1] [-1 0]]
              :place-coords [4 2]}
-   :hash (hash new-game)
-   :version "SNAPSHOT"})
+   :version 0})
+
+(defn place-move [{:keys [player] :as game} coords]
+  (when (place? game coords)
+    (let [upd-game (place game coords)]
+      (if (win? upd-game coords)
+        (win game)
+        upd-game))))
+
+(defn free-move [game coords-1 coords-2]
+  (and (free? game coords-1 coords-2)
+       (free game coords-1 coords-2)))
+
+(defn hop-move [game coords directions plc-coords]
+  (when (hops? game coords directions)
+    (-> (hops game coords directions)
+        (#(when plc-coords
+            (and (place-open? % plc-coords)
+                 (place game % plc-coords))))
+        (#(if (win? % plc-coords)
+            (win game) game)))))
+
+;;;; Common Checks
+;; Game still going?
+;; Right Player
+;; {Move Checks}
+;; Next Turn
 
 ;;;; Place Move
 ;; place?
 ;; place
 ;; if win?
 ;; -> win
-;; next turn (turn + player change)
 
 ;;;; Free Move
 ;; free?
 ;; free
-;; next turn
 
 ;;;; Hop
 ;; hops?
@@ -273,26 +322,7 @@
 ;; -> place
 ;; if win?
 ;; -> win
-;; next turn
 
-;;;; Iterating Over Cells
-
-(defn cell-mask [{:keys [size] :as game} f]
-  (vec (for [x (range size)]
-         (vec (for [y (range size)]
-                (f game [x y]))))))
-
-;; Open Place Mask
-#_(show-board
- (cell-mask test-game #(if (place-open? %1 %2) :red :blue)) 10)
-
-;; Place Mask
-#_(show-board
- (cell-mask test-game #(if (place? %1 %2) :red :blue)) 10)
-
-;; Hop? Mask
-#_(show-board
- (cell-mask test-game (fn [g c] (if (some identity (mapv #(hop? g c %) adjacencies)) :red :blue))) 10)
 
 ;;;; Display
 
