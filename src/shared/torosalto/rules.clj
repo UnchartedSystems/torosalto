@@ -325,35 +325,6 @@
           (and  (place-open? game place-coords)
                 (place game place-coords)))))))
 
-
-
-
-;;;; Common Checks
-;; Game still going?
-;; Right Player
-;; {Move Checks}
-;; Next Turn
-
-;;;; Place Move
-;; place?
-;; place
-;; if win?
-;; -> win
-
-;;;; Free Move
-;; free?
-;; free
-
-;;;; Hop
-;; hops?
-;; hops
-;; if place
-;; -> place-open?
-;; -> place
-;; if win?
-;; -> win
-
-
 ;;;; Display
 
 (defn- num-guides [rows]
