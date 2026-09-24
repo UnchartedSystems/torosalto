@@ -235,25 +235,25 @@
 #_(show-board
  (cell-mask test-game (fn [g c] (if (some identity (mapv #(hop? g c %) adjacencies)) :red :blue))) 10)
 
-;;;; Turn structure
-;; Where should turn be managed and change?
-;; What am I actually building? Validation for CLJ & CLJS? CLJ CLI interaction? CLJS interaction? All?
 
-;;;; Display Backgrounds
-;; Good background text colors?
-;; Should I compare turns to last turns and highlight differences?
-;; Iteration over all options of a turn move ad highlighting them?
+;;;; Next Steps
 
-;;;; Turns
+;;;; Differentiate: Server vs Local
+;;; this will be useful for CLJ vs CLJS games
+;; Server pulls its own copy of the game from SQLite
+;; Local passes the game with the move message
 
-;; Turn instructions should be encoded as data from the website & CLI
-;; Each chrome will use helpers to create interactive turn systems
-;; The output from these interactive systems will be data that gets processed here.
-;; Interactive turn systems should send a hash along with the initial game and turns
-;; At the end after processing moves, hashes will be compared.
-;; It's an API: down the road I'll add error feedback.
+;;;; Change 'false' returns to response maps with error-codes!
+;; This might mean building a macro that makes predicate -> do -> predicate -> do easier.
+;; But it might not mean that!
+;; Start with the easiest moves first.
 
-;; Need to consider how winning works, does the status message mention it? It should?
+;;;; Create a test system for easy tests
+;; Enable an easy notation for defining boards (and maybe moves)
+;; Create the machinery to simulate full games using the rules in here.
+;; Create multiple test moves and test games. Compare the output to a hash of a desired output.
+
+;;;; We're off to the races! Go make a simple CLI, and then a website!
 
 (def free-data
   {:move :free
