@@ -42,8 +42,6 @@
        (populate-board game board)
        game))))
 
-(make-game)
-
 (def new-game
   (make-game))
 
@@ -99,7 +97,7 @@
          (mapv #(move coords-2 % size) adjacencies))))
 
 ;; MARK
-(defn adj-stones [board coords size]
+(defn adj-stones [{:keys [size board]} coords]
   (filterv #(stones (second %))
            (mapv #(vector % (get-in board (move coords % size)))
                  adjacencies)))
@@ -126,7 +124,7 @@
 
 (defn place-open? [{:keys [size board] :as game} coords]
   (and (place? game coords)
-       (empty? (adj-stones board coords size))))
+       (empty? (adj-stones game coords))))
 
 (defn free? [{:keys [size player prison board] :as game} coords-1 coords-2]
   (boolean
@@ -209,8 +207,8 @@
 ;; Sloppy but works: adj-stones wraps.
 ;; Plenty of redundant work.
 ;; When will win be checked? A player can win by hopping (specially on an odd board)
-(defn win? [size board coords team]
-  (let [line-dirs (mapv first (filterv #(= (second %) team) (adj-stones board coords size)))]
+(defn win? [{:keys [size board] :as game} coords team]
+  (let [line-dirs (mapv first (filterv #(= (second %) team) (adj-stones game coords)))]
     (->> (mapv #(scan-line board coords % team) line-dirs)
          (reduce max 0)
          (<= 5))))
@@ -254,7 +252,32 @@
    :hash (hash new-game)
    :version "SNAPSHOT"})
 
+;;;; Place Move
+;; place?
+;; place
+;; if win?
+;; -> win
+;; next turn (turn + player change)
 
+;;;; Free Move
+;; free?
+;; free
+;; next turn
+
+;;;; Hop
+;; hops?
+;; hops
+;; if place
+;; -> place-open?
+;; -> Can Open Place?
+;; -> place
+;; if win?
+;; -> win
+;; next turn
+
+;;;; Iterating Over Cells
+
+(adj-stones (:board test-game) [1 3] 10)
 
 ;;;; Display
 
