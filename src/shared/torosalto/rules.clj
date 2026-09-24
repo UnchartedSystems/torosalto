@@ -71,7 +71,7 @@
 (defn v+ [a b] (mapv + a b))
 (defn v* [n v] (mapv #(* n %) v))
 
-(def letter->y
+(def letter->x
   {"A" 0 "B" 1 "C" 2 "D" 3 "E" 4 "F" 5 "G" 6 "H" 7 "I" 8 "J" 9
    "K" 10 "L" 11 "M" 12 "N" 13 "O" 14 "P" 15 "Q" 16 "R" 17
    "S" 18 "T" 19 "U" 20 "V" 21 "W" 22 "X" 23 "Y" 24 "Z" 25})
@@ -79,7 +79,7 @@
 ;; TODO capitalize letter
 (defn interp-coords [coords]
   (let [[letter num] [(subs coords 0 1) (subs coords 1)]]
-    [(get letter->y letter) (dec (parse-long num))]))
+    [(get letter->x letter) (dec (parse-long num))]))
 
 ;; Will need to be changed to take in a board size
 (defn wrap [[x y] size]
@@ -220,7 +220,7 @@
 ;;;; Display Backgrounds
 ;; Good background text colors?
 ;; Should I compare turns to last turns and highlight differences?
-;; Iteration over all options of a turn move and highlighting them?
+;; Iteration over all options of a turn move ad highlighting them?
 
 ;;;; Turns
 
@@ -277,7 +277,22 @@
 
 ;;;; Iterating Over Cells
 
-(adj-stones (:board test-game) [1 3] 10)
+(defn cell-mask [{:keys [size] :as game} f]
+  (vec (for [x (range size)]
+         (vec (for [y (range size)]
+                (f game [x y]))))))
+
+;; Open Place Mask
+#_(show-board
+ (cell-mask test-game #(if (place-open? %1 %2) :red :blue)) 10)
+
+;; Place Mask
+#_(show-board
+ (cell-mask test-game #(if (place? %1 %2) :red :blue)) 10)
+
+;; Hop? Mask
+#_(show-board
+ (cell-mask test-game (fn [g c] (if (some identity (mapv #(hop? g c %) adjacencies)) :red :blue))) 10)
 
 ;;;; Display
 
@@ -290,9 +305,9 @@
 
 (defn show-board [board size]
   (let [nums (num-guides size)]
-    (doseq [x (reverse (range size))]
-      (print (get nums x))
-      (doseq [y (range size)]
+    (doseq [y (reverse (range size))]
+      (print (get nums y))
+      (doseq [x (range size)]
         (print 
          (case (get-in board [x y])
            :empty   " ·"
