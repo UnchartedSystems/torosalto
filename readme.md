@@ -18,7 +18,7 @@ This is relevant for hopping and placing non-adjacent stones, but this does not 
 Players alternate turns throughout the game. On each turn, you can make one of three choices: Place your stone on an empty square, hop a stone you control over other stones, or free two of your stones from prison.
 
 ### Placing Stones
-Place a stone on any empty square on the board that is not *blocked*. This stone can come from your reserve of unused pieces, or from the prison.
+Place a new stone on any empty square on the board that is not *blocked*. 
 
 #### Open Squares
 An *open* square is an empty square that is not *blocked* and has no stones in adjacent squares. Be mindful that adjacency wraps around the edges of the board, and so a seemingly *open* square along the boundary of a board may be adjacent to stones along the opposite boundary. The rules for *open* squares are relevant when placing a stone after a multi-hop or when freeing stones. If there are no *open* squares available on the board, then that place action is skipped.

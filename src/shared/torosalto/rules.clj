@@ -1,7 +1,7 @@
 (ns torosalto.rules)
 
 ;; Cell States
-(def cell-states #{:empty :red :blue :blocked})
+(def cell-states #{:empty :red :blue})
 (def stones #{:red :blue})
 
 ;; Movement Constraints
@@ -57,7 +57,7 @@
      [[8 7] :red] [[7 8] :red] [[9 8] :blue] [[7 8] :blue]
      [[8 9] :red] [[6 9] :red] [[5 9] :blue] [[9 9] :red]
      [[1 1] :red] [[7 0] :red] [[9 2] :red] [[5 4] :blue]
-     [[5 3] :blue] [[0 8] :blue] [[6 8] :blocked] [[4 0] :blocked]]}))
+     [[5 3] :blue] [[0 8] :blue]]}))
 
 (def win-game
   (make-game
@@ -114,8 +114,9 @@
        (<= 0 x) (< x size)
        (<= 0 y) (< y size)))
 
-(defn place? [{:keys [size board]} coords]
-  (and (legal-position? coords size)
+(defn place? [{:keys [size block board]} coords]
+  (and block
+       (legal-position? coords size)
        (= :empty (get-in board coords))))
 
 (defn place [{:keys [player board] :as game} coords]
@@ -126,7 +127,7 @@
   (and (place? game coords)
        (empty? (adj-stones game coords))))
 
-(defn free? [{:keys [size player prison board] :as game} coords-1 coords-2]
+(defn free? [{:keys [size player block prison board] :as game} coords-1 coords-2]
   (boolean
    (and (<= 2 (get prison player))
         (not= coords-1 coords-2)
@@ -163,9 +164,10 @@
      {:coords hopped-to
       :game (assoc game
                    :prison (update prison captured inc)
+                   :block (if blocked? hopped-over false) 
                    :board (-> board
                               (assoc-in coords :empty)
-                              (assoc-in hopped-over (if blocked? :blocked :empty))
+                              (assoc-in hopped-over :empty)
                               (assoc-in hopped-to attacker)))})))
 
 (defn hops? [{:keys [prison board] :as game} coords directions]
@@ -235,7 +237,6 @@
 #_(show-board
  (cell-mask test-game (fn [g c] (if (some identity (mapv #(hop? g c %) adjacencies)) :red :blue))) 10)
 
-
 ;;;; Next Steps
 
 ;;;; Differentiate: Server vs Local
@@ -277,6 +278,28 @@
    :version 0})
 
 
+(defn place-move [{:keys [player] :as game} {:keys [coords]}]
+  (when (and coords (place? game coords))
+    (let [game (place game coords)]
+      (if (win? game coords)
+        (win game)
+        game))))
+
+(defn free-move [game {:keys [coords-1 coords-2]}]
+  (and (and coords-1 coords-2)
+       (free? game coords-1 coords-2)
+       (free game coords-1 coords-2)))
+
+(defn hop-move [game {:keys [ coords directions place-coords]}]
+  (when (and coords directions (hops? game coords directions))
+    (let [{:keys [game coords]} (hops game coords directions)]
+      (if (win? game coords)
+        (win game)
+        (if-not (and (<= 2(count directions)) place-coords)
+          game
+          (and  (place-open? game place-coords)
+                (place game place-coords)))))))
+
 (defn get-game [id]
   test-game)
 
@@ -284,11 +307,10 @@
   {:red :blue
    :blue :red})
 
-(defn next-turn [game]
+(defn next-turn [{:keys [player turn] :as game}]
   (-> game
-      (assoc-in [:player] #(% next-player))
-      (update-in [:turn] #(inc %))))
-
+      (assoc-in [:player] (player next-player))
+      (assoc-in [:turn] (inc turn))))
 
 (defn process-turn [{:keys [id move player details]}]
   (let [game (get-game id)
@@ -301,29 +323,8 @@
                    :free (free-move game details)
                    :hop (hop-move game details)
                    false)))]
-    (next-turn game)))
+    (when game (next-turn game))))
 
-(defn place-move [{:keys [player] :as game} {:keys [coords]}]
-  (when (and coords (place? game coords))
-    (let [upd-game (place game coords)]
-      (if (win? upd-game coords)
-        (win game)
-        upd-game))))
-
-(defn free-move [game {:keys [coords-1 coords-2]}]
-  (and (and coords-1 coords-2)
-       (free? game coords-1 coords-2)
-       (free game coords-1 coords-2)))
-
-(defn hop-move [game {:keys [ coords directions place-coords]}]
-  (when (and coords directions (hops? game coords directions))
-    (let [{:keys [game coords]} (hops game coords directions)]
-      (if (win? game coords)
-        (win game)
-        (if-not place-coords
-          game
-          (and  (place-open? game place-coords)
-                (place game place-coords)))))))
 
 ;;;; Display
 
@@ -334,6 +335,7 @@
   (subs " A B C D E F G H I J K L M N O P Q R S T U V W X Y Z"
         0 (* columns 2)))
 
+;; Add this-block to rendering
 (defn show-board [board size]
   (let [nums (num-guides size)]
     (doseq [y (reverse (range size))]
@@ -344,7 +346,7 @@
            :empty   " ·"
            :red     "\u001b[31m ◉\u001b[0m"
            :blue    "\u001b[34m ◉\u001b[0m"
-           :blocked " ×")))
+           " ?")))
       (println)))
   (println " " (letter-guides size)))
 
