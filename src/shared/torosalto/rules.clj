@@ -29,11 +29,13 @@
 
 (defn make-game
   ([] (make-game {}))
-  ([{:keys [size turn player prison board]}]
+  ([{:keys [size turn player blocked next-blocked prison board]}]
    (let [size (or size 10)
          empty-board (vec (repeat size (vec (repeat size :empty))))
          game        {:size size
                       :turn (or turn 0)
+                      :blocked (when blocked)
+                      :next-blocked (when next-blocked)
                       :version 0
                       :player (or player :red)
                       :prison (or prison {:red 0 :blue 0})
@@ -114,9 +116,9 @@
        (<= 0 x) (< x size)
        (<= 0 y) (< y size)))
 
-(defn place? [{:keys [size block board]} coords]
-  (and block
-       (legal-position? coords size)
+(defn place? [{:keys [size blocked board]} coords]
+  (and (legal-position? coords size)
+       (not= blocked coords)
        (= :empty (get-in board coords))))
 
 (defn place [{:keys [player board] :as game} coords]
@@ -127,7 +129,7 @@
   (and (place? game coords)
        (empty? (adj-stones game coords))))
 
-(defn free? [{:keys [size player block prison board] :as game} coords-1 coords-2]
+(defn free? [{:keys [size player prison board] :as game} coords-1 coords-2]
   (boolean
    (and (<= 2 (get prison player))
         (not= coords-1 coords-2)
@@ -164,7 +166,7 @@
      {:coords hopped-to
       :game (assoc game
                    :prison (update prison captured inc)
-                   :block (if blocked? hopped-over false) 
+                   :next-blocked (if blocked? hopped-over false) 
                    :board (-> board
                               (assoc-in coords :empty)
                               (assoc-in hopped-over :empty)
@@ -257,20 +259,26 @@
 ;;;; We're off to the races! Go make a simple CLI, and then a website!
 
 (def free-data
-  {:move :free
+  {:local? true
+   :game test-game
+   :move :free
    :player :red
    :details {:coords-1 [5 1]
              :coords-2 [9 3]}
    :version 0})
 
 (def place-data
-  {:move :place
+  {:local? true
+   :game test-game
+   :move :place
    :player :red
-   :details {:coords [4 2]}
+   :details {:coords [4 1]}
    :version 0})
 
 (def hop-data
-  {:move :hop
+  {:local? true
+   :game test-game
+   :move :hop
    :player :red
    :details {:coords [9 9]
              :directions [[0 -1] [-1 0] [0 1]]
@@ -303,28 +311,57 @@
 (defn get-game [id]
   test-game)
 
+(defn save-game [game])
+
 (def next-player
   {:red :blue
    :blue :red})
 
-(defn next-turn [{:keys [player turn] :as game}]
-  (-> game
-      (assoc-in [:player] (player next-player))
-      (assoc-in [:turn] (inc turn))))
+(defn next-turn [{:keys [player turn blocked next-blocked] :as game}]
+  (assoc game
+         :turn (inc turn)
+         :player (player next-player)
+         :blocked next-blocked
+         :next-blocked nil))
 
-(defn process-turn [{:keys [id move player details]}]
-  (let [game (get-game id)
+(defn process-turn [{:keys [local? game id move player details]}]
+  (let [game (if local? game (get-game id))
         game (if (:winner game)
                false
-               (if (not= player (:player game))
-                 false
+               (when (= player (:player game))
                  (case move
                    :place (place-move game details)
                    :free (free-move game details)
                    :hop (hop-move game details)
                    false)))]
-    (when game (next-turn game))))
+    (if game
+      (if local?
+        {:ok? true
+         :game (next-turn game)}
+        (do (save-game game)
+            {:ok? true}))
+      {:ok? false
+       :error nil})))
 
+;;;; Placeholders:
+;; Success, Local:
+#_{:ok? true
+ :game "old game"}
+
+;; Success, Server
+;; ???
+
+;; Failure, Local:
+#_{:ok? false
+ :error :error-type
+ :details {:coords [1 0]
+           :deets nil}}
+
+;; Failure, Server
+;; ???
+
+;; (show-game test-game)
+;; (show-game (:game (process-turn place-data)))
 
 ;;;; Display
 
@@ -335,33 +372,44 @@
   (subs " A B C D E F G H I J K L M N O P Q R S T U V W X Y Z"
         0 (* columns 2)))
 
+(defn red-txt [s]
+  (str "\u001b[31m" s "\u001b[0m"))
+
+(defn blue-txt [s]
+  (str "\u001b[34m" s "\u001b[0m"))
+
 ;; Add this-block to rendering
-(defn show-board [board size]
+(defn show-board [{:keys [size blocked board]}]
   (let [nums (num-guides size)]
     (doseq [y (reverse (range size))]
       (print (get nums y))
       (doseq [x (range size)]
-        (print 
-         (case (get-in board [x y])
-           :empty   " ·"
-           :red     "\u001b[31m ◉\u001b[0m"
-           :blue    "\u001b[34m ◉\u001b[0m"
-           " ?")))
+        (let [cell (get-in board [x y])
+              cell (if (and (= cell :empty)
+                            (= blocked [x y]))
+                     :blocked cell)]
+          (print 
+           (case cell
+             :empty   " ·"
+             :blocked " ×" 
+             :red     (red-txt " ◉")
+             :blue    (blue-txt " ◉")
+             " ?"))))
       (println)))
   (println " " (letter-guides size)))
 
 (defn show-game [{:keys [size player prison board] :as game}]
-  (let [red (format "%2d" (:red prison))
-        blue (format "%2d" (:blue prison))]
+  (let [red-prisoners (format "%2d" (:red prison))
+        blue-prisoners (format "%2d" (:blue prison))]
     (println)
     (println
      (str
       "Turn:"
       (case player
-        :red  "\u001b[31m Red \u001b[0m"
-        :blue "\u001b[34m Blue\u001b[0m")
+        :red  (red-txt " Red ")
+        :blue (blue-txt " Blue"))
       "     "
-      "\u001b[31m " red "\u001b[0m |\u001b[34m" blue "\u001b[0m")))
-  (show-board board size)
+      (red-txt red-prisoners) " |" (blue-txt blue-prisoners))))
+  (show-board game)
   game)
 
