@@ -17,6 +17,42 @@
 (def orthogonal
   #{[1 0] [0 1] [-1 0] [0 -1]})
 
+;;;; Notation
+
+(def letter->x
+  {"A" 0 "B" 1 "C" 2 "D" 3 "E" 4 "F" 5 "G" 6 "H" 7 "I" 8 "J" 9
+   "K" 10 "L" 11 "M" 12 "N" 13 "O" 14 "P" 15 "Q" 16 "R" 17
+   "S" 18 "T" 19 "U" 20 "V" 21 "W" 22 "X" 23 "Y" 24 "Z" 25})
+
+;; TODO capitalize letter
+(defn interp-coords [coords]
+  (let [[letter num] [(subs coords 0 1) (subs coords 1)]]
+    [(get letter->x letter) (dec (parse-long num))]))
+
+;; Notation Reference:
+;; These are the only accepted forms:
+
+;; Place
+"C10"
+;; Free
+"C10+E5"
+;; Hop
+"C10>1793"
+;; Hop & Place
+"C10>1793+E5"
+;; Turn Sequence
+"C4/D5/B3/F5/C3>97+C6/A5+F2"
+;; Optional Hop
+"C10>NW>SW>SE>NE+E5"
+
+(def markers
+  {"+" :place
+   ">" :hop
+   "/" :})
+
+(defn interpret [notation]
+  )
+
 ;;;; Board Creation
 
 (defn- populate-board [game cells]
@@ -74,15 +110,6 @@
 (defn v+ [a b] (mapv + a b))
 (defn v* [n v] (mapv #(* n %) v))
 
-(def letter->x
-  {"A" 0 "B" 1 "C" 2 "D" 3 "E" 4 "F" 5 "G" 6 "H" 7 "I" 8 "J" 9
-   "K" 10 "L" 11 "M" 12 "N" 13 "O" 14 "P" 15 "Q" 16 "R" 17
-   "S" 18 "T" 19 "U" 20 "V" 21 "W" 22 "X" 23 "Y" 24 "Z" 25})
-
-;; TODO capitalize letter
-(defn interp-coords [coords]
-  (let [[letter num] [(subs coords 0 1) (subs coords 1)]]
-    [(get letter->x letter) (dec (parse-long num))]))
 
 ;; Will need to be changed to take in a board size
 (defn wrap [[x y] size]
@@ -268,7 +295,7 @@
 ;;;; Win Condition
 
 ;; TODO: refactor to end evaluation on first evaluated win
-(defn- scan-line [{:keys [player size board]} coords direction]
+(defn scan-line [{:keys [player size board]} coords direction]
   (->> (mapv #(v* % direction) (range -4 5))
        (mapv #(v+ coords %))
        (filterv #(legal-position? % size))
@@ -310,30 +337,6 @@
 #_(show-board
  (cell-mask test-game (fn [g c] (if (some identity (mapv #(hop? g c %) adjacencies)) :red :blue))) 10)
 
-;;;; Next Steps
-
-;;;; Differentiate: Server vs Local
-;;; this will be useful for CLJ vs CLJS games
-;; Server pulls its own copy of the game from SQLite
-;; Local passes the game with the move message
-
-;;;; Change 'false' returns to response maps with error-codes!
-;; This might mean building a macro that makes predicate -> do -> predicate -> do easier.
-;; But it might not mean that!
-;; Start with the easiest moves first.
-
-;;;; Create a test system for easy tests
-;; Enable an easy notation for defining boards (and maybe moves)
-;; Create the machinery to simulate full games using the rules in here.
-;; Create multiple test moves and test games. Compare the output to a hash of a desired output.
-
-;;;; We're off to the races! Go make a simple CLI, and then a website!
-
-
-
-;; Process Turn is responsible for validating top level message parameters
-;; Moves are responsible for validating details paremeters pertinent to their move
-
 (defn place-move [game {:keys [coords]}]
   (or (place-error game coords)
       (let [game (place game coords)]
@@ -352,15 +355,9 @@
             (evaluate-hops game coords directions)]
         (or (when error state)
             (when (win? game coords) {:game game :win? true})
-            ;; TODO: add a check if place-coords is actually impossible
             (when-not place-coords {:game game})
             (place-error game place-coords)
             {:game (place game place-coords)}))))
-
-(defn get-game [id]
-  {:game test-game})
-
-(defn save-game [game])
 
 (def next-player
   {:red :blue
@@ -373,19 +370,11 @@
          :blocked next-blocked
          :next-blocked nil))
 
-;; TODO: will check if any necessary inputs are empty
-(defn input-error [])
-
-
-(defn process-turn [game {:keys [move player details] :as mssg}]
+(defn process-turn [game {:keys [move details] :as mssg}]
   (or (when (:winner game)
         {:error :turn/game-already-ended
          :details {:winner (:winner game)}})
-      
-      (when-not (= player (:player game))
-        {:error :turn/wrong-turn
-         :details {:player player
-                   :turn (:player game)}})
+                 
       (let [{:keys [error game win?] :as state}
             (case move
               :place (place-move game details)
@@ -399,8 +388,25 @@
               {:game (win game)})
             {:game (next-turn game)}))))
 
+;;;; Differentiate: Server vs Local
+;; this will be useful for CLJ vs CLJS games
+;; Server uses accounts with salted auth
+;; Server pulls its own copy of the game from SQLite
+;; Local passes the game with the move message
+
+;; Test the game player against the player of the user
+#_(when-not (= player (:player game))
+        {:error :turn/wrong-turn
+         :details {:player player
+                   :turn (:player game)}})
+
+(defn- get-game [id]
+  {:game (make-game)})
+
+(defn- save-game [game])
+
 ;; Validates Message Inputs
-(defn message-error [mssg]
+(defn- message-error [mssg]
   nil)
 
 (defn process-message [{:keys [local? id game] :as mssg}]
@@ -418,26 +424,6 @@
                   {:game game
                    :game-hash (hash game)})
                 {:game-hash (hash (save-game game))}))))))
-
-;;;; Placeholders:
-;; Success, Local:
-#_{:ok? true
- :game "old game"}
-
-;; Success, Server
-;; ???
-
-;; Failure, Local:
-#_{:ok? false
- :error :error-type
- :details {:coords [1 0]
-           :deets nil}}
-
-;; Failure, Server
-;; ???
-
-;; (show-game test-game)
-;; (show-game (:game (process-turn place-data)))
 
 ;;;; Display
 
