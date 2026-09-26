@@ -35,4 +35,4 @@ If your turn is composed of a single hop, then the square that was hopped over b
 If you perform multiple hops within a turn, then you may place one stone on an *open* square before ending your turn.
 
 ### Freeing Stones
-You may take two of your stones from the prison, if available, and place them on *open* squares on the board. You cannot place these two stones in adjacent squares.
+Take two of your available stones from the prison, and place them on *open* squares on the board. You cannot place these two stones in adjacent squares. Freeing is only possible if the necessary stones and open spaces are available.

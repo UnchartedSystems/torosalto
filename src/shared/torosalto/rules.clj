@@ -17,41 +17,6 @@
 (def orthogonal
   #{[1 0] [0 1] [-1 0] [0 -1]})
 
-;;;; Notation
-
-(def letter->x
-  {"A" 0 "B" 1 "C" 2 "D" 3 "E" 4 "F" 5 "G" 6 "H" 7 "I" 8 "J" 9
-   "K" 10 "L" 11 "M" 12 "N" 13 "O" 14 "P" 15 "Q" 16 "R" 17
-   "S" 18 "T" 19 "U" 20 "V" 21 "W" 22 "X" 23 "Y" 24 "Z" 25})
-
-;; TODO capitalize letter
-(defn interp-coords [coords]
-  (let [[letter num] [(subs coords 0 1) (subs coords 1)]]
-    [(get letter->x letter) (dec (parse-long num))]))
-
-;; Notation Reference:
-;; These are the only accepted forms:
-
-;; Place
-"C10"
-;; Free
-"C10+E5"
-;; Hop
-"C10>1793"
-;; Hop & Place
-"C10>1793+E5"
-;; Turn Sequence
-"C4/D5/B3/F5/C3>97+C6/A5+F2"
-;; Optional Hop
-"C10>NW>SW>SE>NE+E5"
-
-(def markers
-  {"+" :place
-   ">" :hop
-   "/" :})
-
-(defn interpret [notation]
-  )
 
 ;;;; Board Creation
 
@@ -69,8 +34,8 @@
          empty-board (vec (repeat size (vec (repeat size :empty))))
          game {:size size
                :turn (or turn 0)
-               :blocked (when blocked)
-               :next-blocked (when next-blocked)
+               :blocked (or blocked nil)
+               :next-blocked (or next-blocked nil)
                :version 0
                :player (or player :red)
                :prison (or prison {:red 0 :blue 0})
@@ -78,7 +43,6 @@
      (if cells
        (populate-board game cells)
        game))))
-
 
 (def new-game
   (make-game))
@@ -137,7 +101,58 @@
         (orthogonal direction) orthogonal
         :else false))
 
+;;;; Cell Masks
+
+(defn cell-mask [{:keys [size] :as game} f]
+  (vec (for [x (range size)]
+         (vec (for [y (range size)]
+                (f game [x y]))))))
+
+;; Open Place Mask
+#_(show-board
+ (cell-mask test-game #(if (place-open? %1 %2) :red :blue)) 10)
+
+;; Place Mask
+#_(show-board
+ (cell-mask test-game #(if (place? %1 %2) :red :blue)) 10)
+
+;; All Hop? Mask
+#_(show-board
+ (cell-mask test-game (fn [g c] (if (some identity (mapv #(hop? g c %) adjacencies)) :red :blue))) 10)
+
+;;;; Win Condition
+
+;; TODO: refactor to end evaluation on first evaluated win
+(defn scan-line [{:keys [player size board]} coords direction]
+  (->> (mapv #(v* % direction) (range -4 5))
+       (mapv #(v+ coords %))
+       (filterv #(legal-position? % size))
+       (mapv #(get-in board %))
+       (mapv #(= player %))
+       (partition-by identity)
+       (filterv first)
+       (mapv count)
+       (reduce max 0)))
+
+;; Sloppy but works: get-adj-stones wraps.
+;; Plenty of redundant work.
+;; When will win be checked? A player can win by hopping (specially on an odd board)
+(defn win? [{:keys [player size board] :as game} coords]
+  (let [line-dirs (mapv first (filterv #(= (second %) player) (get-adj-stones game coords)))]
+    (->> (mapv #(scan-line game coords %) line-dirs)
+         (reduce max 0)
+         (<= 5))))
+
+(defn win [{:keys [player] :as game}]
+  (assoc game :winner player))
+
 ;;;; Legality Checks
+
+(defn- throw-error! [e]
+  (when e
+    (throw
+     (ex-info (str "Illegal move: " (:error e))
+               {::error e}))))
 
 (defn- legal-position? [coords size]
   (and (= 2 (count coords))
@@ -199,17 +214,6 @@
          {:coords-1 coords-1
           :coords-2 coords-2}})))
 
-;;;; Move Actions
-
-(defn place [{:keys [player board] :as game} coords]
-  (assoc game :board (assoc-in board coords player)))
-
-(defn free [{:keys [player prison board] :as game} coords-1 coords-2]
-  (-> game
-      (update-in [:prison player] - 2)
-      (place coords-1)
-      (place coords-2)))
-
 (defn hop-error
   ([game coords direction]
    (hop-error game coords direction adjacencies))
@@ -250,6 +254,19 @@
                       :dest-coords dest-coords
                       :dest-cell dest-cell}})))))
 
+;;;; Move Actions
+
+(defn place [{:keys [player board] :as game} coords]
+  (assoc game :board (assoc-in board coords player)))
+
+(defn free [{:keys [player prison board] :as game} coords-1 coords-2]
+  (-> game
+      (update-in [:prison player] - 2)
+      (place coords-1)
+      (place coords-2)))
+
+
+
 ;; Either here or hops, need to check player against coords stone
 (defn- hop
   ([game coords direction]
@@ -264,7 +281,7 @@
      {:coords landing-coords
       :game (assoc game
              :prison (update prison captured inc)
-             :next-blocked (if blocked? hopped-coords false) 
+             :next-blocked (if blocked? hopped-coords nil) 
              :board (-> board
                         (assoc-in coords :empty)
                         (assoc-in hopped-coords :empty)
@@ -275,89 +292,56 @@
 (defn evaluate-hops [game coords directions]
   (let [constraint (get-constraint (first directions))
         blocked?   (= 1 (count directions))]
-    (or (when-not constraint
-          {:error :hops/no-constraint
-           :details {:directions directions}})
-        
-        (when (empty? directions)
-          {:error :hops/no-directions
-           :details {:directions directions}})
-        
-        (loop [state {:game game :coords coords}
-               remaining directions]
-          (if (empty? remaining) state
-              (let [{:keys [game coords]} state
-                    direction (first remaining)]
-                (or (hop-error game coords direction constraint)
-                    (recur (hop game coords direction)
-                           (rest remaining)))))))))
+    (throw-error!
+     (or (when-not constraint
+           {:error :hops/no-constraint
+            :details {:directions directions}})
+         
+         (when (empty? directions)
+           {:error :hops/no-directions
+            :details {:directions directions}})))
+    
+    (loop [{:keys [game coords] :as state} {:game game :coords coords}
+           remaining directions]
+      (or
+       (when (win? game coords)
+         {:game game
+          :winner (:player game)})
 
-;;;; Win Condition
+       (when (empty? remaining) state)
+       (throw-error! (hop-error game coords (first remaining) constraint))
+       (recur (hop game coords (first remaining) blocked?)
+              (rest remaining))))))
 
-;; TODO: refactor to end evaluation on first evaluated win
-(defn scan-line [{:keys [player size board]} coords direction]
-  (->> (mapv #(v* % direction) (range -4 5))
-       (mapv #(v+ coords %))
-       (filterv #(legal-position? % size))
-       (mapv #(get-in board %))
-       (mapv #(= player %))
-       (partition-by identity)
-       (filterv first)
-       (mapv count)
-       (reduce max 0)))
-
-;; Sloppy but works: get-adj-stones wraps.
-;; Plenty of redundant work.
-;; When will win be checked? A player can win by hopping (specially on an odd board)
-(defn win? [{:keys [player size board] :as game} coords]
-  (let [line-dirs (mapv first (filterv #(= (second %) player) (get-adj-stones game coords)))]
-    (->> (mapv #(scan-line game coords %) line-dirs)
-         (reduce max 0)
-         (<= 5))))
-
-(defn win [{:keys [player] :as game}]
-  (assoc game :winner player))
-
-;;;; Iterating Over Cells
-
-(defn cell-mask [{:keys [size] :as game} f]
-  (vec (for [x (range size)]
-         (vec (for [y (range size)]
-                (f game [x y]))))))
-
-;; Open Place Mask
-#_(show-board
- (cell-mask test-game #(if (place-open? %1 %2) :red :blue)) 10)
-
-;; Place Mask
-#_(show-board
- (cell-mask test-game #(if (place? %1 %2) :red :blue)) 10)
-
-;; All Hop? Mask
-#_(show-board
- (cell-mask test-game (fn [g c] (if (some identity (mapv #(hop? g c %) adjacencies)) :red :blue))) 10)
 
 (defn place-move [game {:keys [coords]}]
-  (or (place-error game coords)
-      (let [game (place game coords)]
-        (if (win? game coords)
-          {:game game
-           :win? true}
-          {:game game}))))
+  (throw-error! (place-error game coords))
+  (let [game (place game coords)]
+    (if (win? game coords)
+      {:game game
+       :winner (:player game)}
+      {:game game})))
 
 (defn free-move [game {:keys [coords-1 coords-2]}]
-  (or (free-error game coords-1 coords-2)
-      {:game (free game coords-1 coords-2)}))
+  (throw-error! (free-error game coords-1 coords-2))
+  {:game (free game coords-1 coords-2)})
 
 (defn hop-move [game {:keys [coords directions place-coords]}]
-  (or (position-error coords (:size game))
-      (let [{:keys [error coords game] :as state}
-            (evaluate-hops game coords directions)]
-        (or (when error state)
-            (when (win? game coords) {:game game :win? true})
-            (when-not place-coords {:game game})
-            (place-error game place-coords)
-            {:game (place game place-coords)}))))
+  (throw-error! (position-error coords (:size game)))
+  (let [{:keys [ game winner] :as state}
+        (evaluate-hops game coords directions)]
+    (or
+     (when winner state)
+     (when-not place-coords state)
+     
+     (throw-error!
+      (or (open-place-error game place-coords)
+          (when-not (<= 2 (count directions))
+            {:error :hop-move/invalid-place
+             :details {:directions directions
+                       :place-coords place-coords}})))
+     
+     {:game (place game place-coords)})))
 
 (def next-player
   {:red :blue
@@ -370,23 +354,24 @@
          :blocked next-blocked
          :next-blocked nil))
 
-(defn process-turn [game {:keys [move details] :as mssg}]
-  (or (when (:winner game)
-        {:error :turn/game-already-ended
-         :details {:winner (:winner game)}})
-                 
-      (let [{:keys [error game win?] :as state}
-            (case move
-              :place (place-move game details)
-              :free (free-move game details)
-              :hop (hop-move game details)
-              {:error :turn/invalid-move
-               :details {:move move}})]
-        
-        (or (when error state)
-            (when win?
-              {:game (win game)})
-            {:game (next-turn game)}))))
+(defn- process-turn [game {:keys [move details] :as mssg}]
+  (throw-error!
+   (when (:winner game)
+     {:error :turn/game-already-ended
+      :details {:winner (:winner game)}}))
+  
+  (let [{:keys [game winner] :as state}
+        (case move
+          :place (place-move game details)
+          :free (free-move game details)
+          :hop (hop-move game details)
+          (throw-error!
+           {:error :turn/invalid-move
+            :details {:move move}}))]
+    
+    (if winner
+       (win game)
+       (next-turn game))))
 
 ;;;; Differentiate: Server vs Local
 ;; this will be useful for CLJ vs CLJS games
@@ -409,21 +394,22 @@
 (defn- message-error [mssg]
   nil)
 
-(defn process-message [{:keys [local? id game] :as mssg}]
-  (or (message-error mssg)
-      (let [{:keys [error game] :as record}
-            (if local?
-              {:game game}
-              (get-game id))]
-        (if error
-          record
-          (let [{:keys [error game] :as state} (process-turn game mssg)]
-            (or (when error
-                  state)
-                (when local?
-                  {:game game
-                   :game-hash (hash game)})
-                {:game-hash (hash (save-game game))}))))))
+(defn- process-message [{:keys [local? id game] :as mssg}]
+  (throw-error! (message-error mssg))
+  (let [game (if local? game (get-game id))
+        game (process-turn game mssg)]
+    (if local?
+      {:game game
+       :game-hash (hash game)}
+      {:game-hash (hash (save-game game))})))
+
+(defn evaluate [mssg]
+  (try
+    (process-message mssg)
+    (catch clojure.lang.ExceptionInfo e
+      (if-let [error (::rule-error (ex-data e))]
+        error
+        (throw e)))))
 
 ;;;; Display
 
