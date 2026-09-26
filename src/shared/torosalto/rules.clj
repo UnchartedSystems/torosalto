@@ -53,7 +53,8 @@
 
 (def test-game
   (make-game
-   {:cells
+   {:prison {:red 3 :blue 1}
+    :cells
     [[[3 5] :red] [[3 3] :red] [[2 6] :blue] [[2 5] :red]
      [[2 3] :red] [[1 4] :red] [[5 5] :red] [[8 8] :blue]
      [[8 7] :red] [[7 8] :red] [[9 8] :blue] [[7 8] :blue]
@@ -153,7 +154,10 @@
 
 
 (defn free-error [{:keys [size player prison board] :as game} coords-1 coords-2]
-  (or (when-not (<= 2 (get prison player))
+  (or (open-place-error game coords-1)
+      (open-place-error game coords-2)
+
+      (when-not (<= 2 (get prison player))
         {:error :free/lacking-stones
          :details {:prison prison
                    :player player}})
@@ -166,10 +170,7 @@
       (when (adjacent? coords-1 coords-2 size)
         {:error :free/coords-close :details
          {:coords-1 coords-1
-          :coords-2 coords-2}})
-      
-      (open-place-error game coords-1)
-      (open-place-error game coords-2)))
+          :coords-2 coords-2}})))
 
 ;;;; Move Actions
 
@@ -328,59 +329,36 @@
 
 ;;;; We're off to the races! Go make a simple CLI, and then a website!
 
-(def free-data
-  {:local? true
-   :game test-game
-   :move :free
-   :player :red
-   :details {:coords-1 [5 1]
-             :coords-2 [9 3]}
-   :version 0})
-
-(def place-data
-  {:local? true
-   :game test-game
-   :move :place
-   :player :red
-   :details {:coords [4 1]}
-   :version 0})
-
-(def hop-data
-  {:local? true
-   :game test-game
-   :move :hop
-   :player :red
-   :details {:coords [9 9]
-             :directions [[0 -1] [-1 0] [0 1]]
-             :place-coords [4 1]}
-   :version 0})
 
 
-;; TODO: implement new place move
+;; Process Turn is responsible for validating top level message parameters
+;; Moves are responsible for validating details paremeters pertinent to their move
+
 (defn place-move [game {:keys [coords]}]
   (or (place-error game coords)
       (let [game (place game coords)]
         (if (win? game coords)
-          (win game)
-          game))))
+          {:game game
+           :win? true}
+          {:game game}))))
 
 (defn free-move [game {:keys [coords-1 coords-2]}]
-  (and (and coords-1 coords-2)
-       (free? game coords-1 coords-2)
-       (free game coords-1 coords-2)))
+  (or (free-error game coords-1 coords-2)
+      {:game (free game coords-1 coords-2)}))
 
-(defn hop-move [game {:keys [ coords directions place-coords]}]
-  (when (and coords directions (hops? game coords directions))
-    (let [{:keys [game coords]} (hops game coords directions)]
-      (if (win? game coords)
-        (win game)
-        (if-not (and (<= 2(count directions)) place-coords)
-          game
-          (and  (place-open? game place-coords)
-                (place game place-coords)))))))
+(defn hop-move [game {:keys [coords directions place-coords]}]
+  (or (position-error coords (:size game))
+      (let [{:keys [error coords game] :as state}
+            (evaluate-hops game coords directions)]
+        (or (when error state)
+            (when (win? game coords) {:game game :win? true})
+            ;; TODO: add a check if place-coords is actually impossible
+            (when-not place-coords {:game game})
+            (place-error game place-coords)
+            {:game (place game place-coords)}))))
 
 (defn get-game [id]
-  test-game)
+  {:game test-game})
 
 (defn save-game [game])
 
@@ -398,61 +376,48 @@
 ;; TODO: will check if any necessary inputs are empty
 (defn input-error [])
 
-(defn process-turn [{:keys [local? game id move player details]}]
-  (let [game (if local? game (get-game id))
-        game (if (:winner game)
-               false
-               (when (= player (:player game))
-                 (case move
-                   :place (place-move game details)
-                   :free (free-move game details)
-                   :hop (hop-move game details)
-                   false)))]
-    (if game
-      (if local?
-        {:ok? true
-         :game (next-turn game)}
-        (do (save-game game)
-            {:ok? true}))
-      {:ok? false
-       :error nil})))
 
+(defn process-turn [game {:keys [move player details] :as mssg}]
+  (or (when (:winner game)
+        {:error :turn/game-already-ended
+         :details {:winner (:winner game)}})
+      
+      (when-not (= player (:player game))
+        {:error :turn/wrong-turn
+         :details {:player player
+                   :turn (:player game)}})
+      (let [{:keys [error game win?] :as state}
+            (case move
+              :place (place-move game details)
+              :free (free-move game details)
+              :hop (hop-move game details)
+              {:error :turn/invalid-move
+               :details {:move move}})]
+        
+        (or (when error state)
+            (when win?
+              {:game (win game)})
+            {:game (next-turn game)}))))
+
+;; Validates Message Inputs
 (defn message-error [mssg]
   nil)
 
-(defn process-turn [{:keys [local? game id move player details] :as mssg}]
+(defn process-message [{:keys [local? id game] :as mssg}]
   (or (message-error mssg)
-      (let [game (if local? game (get-game id))]
-        (or (when (:winner game)
-              {:error :turn/game-already-ended
-               :details {:winner (:winner game)}})
-            
-            (when-not (= player (:player game))
-              {:error :turn/wrong-turn
-               :details {:player player
-                         :turn (:player game)}})
-            
-            (let [upd-game (case move
-                             :place (place-move game details)
-                             :free (free-move game details)
-                             :hop (hop-move game details)
-                             nil)]
-              
-              (or (when-not upd-game
-                    {:error :turn/invalid-move
-                     :details {:move move}})
-                  
-                  (when local?
-                    {:game upd-game
-                     :game-hash (hash upd-game)})
-                  
-                  (do (save-game)
-                      {:game-hash (hash upd-game)})))))))
-
-
-(show-game test-game)
-(show-game (:game (process-turn place-data)))
-
+      (let [{:keys [error game] :as record}
+            (if local?
+              {:game game}
+              (get-game id))]
+        (if error
+          record
+          (let [{:keys [error game] :as state} (process-turn game mssg)]
+            (or (when error
+                  state)
+                (when local?
+                  {:game game
+                   :game-hash (hash game)})
+                {:game-hash (hash (save-game game))}))))))
 
 ;;;; Placeholders:
 ;; Success, Local:
@@ -475,6 +440,8 @@
 ;; (show-game (:game (process-turn place-data)))
 
 ;;;; Display
+
+(format "%3d" 99)
 
 (defn- num-guides [rows]
   (mapv #(format "%2d" %) (range 1 (inc rows))))
@@ -509,18 +476,17 @@
       (println)))
   (println " " (letter-guides size)))
 
-(defn show-game [{:keys [size player prison board] :as game}]
-  (let [red-prisoners (format "%2d" (:red prison))
-        blue-prisoners (format "%2d" (:blue prison))]
+(defn show-game [{:keys [turn player prison] :as game}]
+  (let [red-prisoners  (format "%2d" (:red prison))
+        blue-prisoners (format "%2d" (:blue prison))
+        player-name    (case player :red "Red" :blue "Blue")
+        color-fn       (case player :red red-txt :blue blue-txt)
+        prefix         (str turn ": " player-name)
+        padding        (apply str (repeat (max 0 (- 16 (count prefix))) \space))]
     (println)
     (println
-     (str
-      "Turn:"
-      (case player
-        :red  (red-txt " Red ")
-        :blue (blue-txt " Blue"))
-      "     "
-      (red-txt red-prisoners) " |" (blue-txt blue-prisoners))))
+     (str turn ": " (color-fn player-name) padding
+          (red-txt red-prisoners) " |" (blue-txt blue-prisoners))))
   (show-board game)
   game)
 
