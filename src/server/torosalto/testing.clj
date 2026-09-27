@@ -24,29 +24,26 @@
 
 (def free-data
   {:version 0
-   :local? true
+   :persistent? false
    :game test-game
-   :move :free
-   :details {:coords-1 [5 1]
-             :coords-2 [7 5]}})
+   :turn {:action :free
+          :details {:coords-1 [5 1]
+                    :coords-2 [7 5]}}}) 
 
 (def place-data
   {:version 0
-   :local? true
+   :persistent? false
    :game test-game
-   :move :place
-   :details {:coords [2 4]}})
+   :turn {:action :place
+          :details {:coords [2 4]}}})
 
 (def hop-data
   {:version 0
-   :local? true
+   :persistent? false
    :game test-game
-   :move :hop
-   :details {:coords [9 9]
-             :directions [[0 -1] [-1 0] [0 1]]
-             :place-coords [2 8]}})
-
-(rules/show-game  test-game)
-(rules/show-game (:game (rules/evaluate place-data)))
-(rules/show-game (:game (rules/evaluate free-data)))
-(rules/show-game (:game (rules/evaluate hop-data)))
+   :turn {:action :hop
+          :details {:coords [9 9]
+                    :place-coords [2 8]
+                    :directions [[0 -1]
+                                 [-1 0]
+                                 [0 1]]}}})

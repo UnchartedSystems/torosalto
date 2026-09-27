@@ -53,7 +53,7 @@
   (and
    (= 1 (count line))
    (let [coords (interp-coords (first line))]
-     {:move :place
+     {:action :place
       :details {:coords coords}})))
 
 (defn convert-free [line]
@@ -62,7 +62,7 @@
    (= "+" (second line))
    (let [coords-1 (interp-coords (first line))
          coords-2 (interp-coords (peek line))]
-     {:move :free
+     {:action :free
       :details {:coords-1 coords-1
                 :coords-2 coords-2}})))
 
@@ -77,22 +77,36 @@
      (loop [[n1 n2 & ns] line
             directions []]
        (if (empty? ns)
-         {:coords coords
-          :place-coords place-coords
-          :directions (conj directions (get dir->delta n1))}
-         (recur ns (conj directions (get dir->delta n1))))))))
+         {:action :hop
+          :details {:coords coords
+                    :place-coords place-coords
+                    :directions (conj directions (get dir->delta n1))}}
+         (recur ns (conj directions (get dir->delta n1)))))))) 
 
+;; TODO: add untrusted input validation, checks, QOL impr.
 (defn interpret [notation]
-  (let [lines (parse-str (str/upper-case notation))]
+  (let [moves (parse-str (str/upper-case notation))]
     (vec
-     (for [line lines]
-       (or (convert-place line)
-           (convert-free line)
-           (convert-hop line)
+     (for [move moves]
+       (or (convert-place move)
+           (convert-free move)
+           (convert-hop move)
            {:error :notation/no-match})))))
 
+(defn simulate-game
+  ([game notation]
+   (simulate-game game false notation))
+  
+  ([game show? notation]
+   (let [turns (interpret notation)]
+     (loop [{:keys [error] :as mssg} {:game game}
+            remaining turns]
+       (or (when error mssg)
+           (when show? (do (rules/show-game (:game mssg)) nil))
+           (when (empty? remaining) mssg)
+           (recur (rules/evaluate
+                   (assoc mssg :turn (first remaining)))
+                  (rest remaining)))))))
 
-;; Absolutely thrown together
-;; No validation, no checks, messy quick code
-(interpret "C4/D5/B3/F5/C10>NW>SW>SE>NE+E5/A5+F2")
+(simulate-game (rules/make-game) true "C4/D5/B3/D4/H8/D4>W>S+J1/H2+B7/C4")
 

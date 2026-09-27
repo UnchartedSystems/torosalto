@@ -30,11 +30,11 @@
 (defn make-game
   ([] (make-game {}))
   
-  ([{:keys [size turn player blocked next-blocked prison cells]}]
+  ([{:keys [size turn-number player blocked next-blocked prison cells]}]
    (let [size (or size 10)
          empty-board (vec (repeat size (vec (repeat size :empty))))
          game {:size size
-               :turn (or turn 0)
+               :turn-number (or turn-number 1)
                :blocked (or blocked nil)
                :next-blocked (or next-blocked nil)
                :version 0
@@ -104,52 +104,12 @@
         (orthogonal direction) orthogonal
         :else false))
 
-;;;; Cell Masks
-
-(defn cell-mask [f [b1 b2] {:keys [size] :as game}]
-  (let [indices (range size)]
-    {:size size
-     :board
-     (mapv
-      (fn [x] (mapv
-               (fn [y] (if (f game [x y]) b1 b2))
-               indices))
-      indices)}))
-
-(defn any-cell? [f {:keys [size] :as game}]
-  (boolean
-   (some #(f game %)
-         (for [y (range size)
-               x (range size)]
-           [x y]))))
-
-(def open-place-mask
-  (partial cell-mask #(not (open-place-error %1 %2)) [:blue :empty]))
-
-(def any-open-place?
-  (partial any-cell? #(not (open-place-error %1 %2))))
-
-(def place-mask
-  (partial cell-mask #(not (place-error %1 %2)) [:blue :empty]))
-
-(def any-place?
-  (partial any-cell? #(not (place-error %1 %2))))
-
-(def hop-mask
-  (partial cell-mask
-           (fn [g c] (some nil? (mapv #(hop-error g c %) adjacencies)))
-           [:blue :empty]))
-
-(def any-hop?
-  (partial any-cell?
-           (fn [g c] ((some nil? (mapv #(hop-error g c %) adjacencies))))))
-
 ;;;; Legality Checks
 
 (defn- throw-error! [e]
   (when e
     (throw
-     (ex-info (str "Illegal move: " (:error e))
+     (ex-info (str "Illegal Game Action: " (:error e))
                {::error e}))))
 
 (defn- legal-position? [coords size]
@@ -252,6 +212,46 @@
                       :dest-coords dest-coords
                       :dest-cell dest-cell}})))))
 
+;;;; Cell Masks
+
+(defn cell-mask [f [b1 b2] {:keys [size] :as game}]
+  (let [indices (range size)]
+    {:size size
+     :board
+     (mapv
+      (fn [x] (mapv
+               (fn [y] (if (f game [x y]) b1 b2))
+               indices))
+      indices)}))
+
+(defn any-cell? [f {:keys [size] :as game}]
+  (boolean
+   (some #(f game %)
+         (for [y (range size)
+               x (range size)]
+           [x y]))))
+
+(def open-place-mask
+  (partial cell-mask #(not (open-place-error %1 %2)) [:blue :empty]))
+
+(def any-open-place?
+  (partial any-cell? #(not (open-place-error %1 %2))))
+
+(def place-mask
+  (partial cell-mask #(not (place-error %1 %2)) [:blue :empty]))
+
+(def any-place?
+  (partial any-cell? #(not (place-error %1 %2))))
+
+(def hop-mask
+  (partial cell-mask
+           (fn [g c] (some nil? (mapv #(hop-error g c %) adjacencies)))
+           [:blue :empty]))
+
+(def any-hop?
+  (partial any-cell?
+           (fn [g c] ((some nil? (mapv #(hop-error g c %) adjacencies))))))
+
 ;;;; Win Condition
 
 ;; TODO: refactor to end evaluation on first evaluated win
@@ -334,18 +334,18 @@
               (rest remaining))))))
 
 
-(defn place-move [game {:keys [coords]}]
+(defn place-action [game {:keys [coords]}]
   (throw-error! (place-error game coords))
   (let [game (place game coords)]
     (if (win? game coords)
       (assoc game :winner (:player game))
       game)))
 
-(defn free-move [game {:keys [coords-1 coords-2]}]
+(defn free-action [game {:keys [coords-1 coords-2]}]
   (throw-error! (free-error game coords-1 coords-2))
   (free game coords-1 coords-2))
 
-(defn hop-move [game {:keys [coords directions place-coords]}]
+(defn hop-action [game {:keys [coords directions place-coords]}]
   (throw-error! (position-error coords (:size game)))
   (let [{:keys [winner] :as game}
         (evaluate-hops game coords directions)]
@@ -356,7 +356,7 @@
      (throw-error!
       (or (open-place-error game place-coords)
           (when-not (<= 2 (count directions))
-            {:error :hop-move/invalid-place
+            {:error :hop-action/invalid-place
              :details {:directions directions
                        :place-coords place-coords}})))
      
@@ -366,28 +366,28 @@
   {:red :blue
    :blue :red})
 
-(defn next-turn [{:keys [player turn blocked next-blocked] :as game}]
+(defn next-turn [{:keys [player turn-number blocked next-blocked] :as game}]
   (assoc game
-         :turn (inc turn)
+         :turn-number (inc turn-number)
          :player (player next-player)
          :blocked next-blocked
          :next-blocked nil))
 
 ;; TODO: process draws!
-(defn- process-turn [game {:keys [move details] :as mssg}]
+(defn- process-turn [game {:keys [action details] :as turn}]
   (throw-error!
    (when (:winner game)
      {:error :turn/game-already-ended
       :details {:winner (:winner game)}}))
   
   (let [{:keys [winner] :as game}
-        (case move
-          :place (place-move game details)
-          :free (free-move game details)
-          :hop (hop-move game details)
+        (case action
+          :place (place-action game details)
+          :free (free-action game details)
+          :hop (hop-action game details)
           (throw-error!
-           {:error :turn/invalid-move
-            :details {:move move}}))]
+           {:error :turn/invalid-action
+            :details {:action action}}))]
     
     (if winner
        (win game)
@@ -396,7 +396,7 @@
 ;;;; Differentiate: Server vs Local
 ;; Server uses accounts with salted auth
 ;; Server pulls its own copy of the game from SQLite
-;; Local passes the game with the move message
+;; Local passes the game with the action message
 ;; Test the game player against the player of the user
 
 (defn- get-game [id] (make-game))
@@ -406,14 +406,15 @@
 ;; Validates Message Inputs
 (defn- message-error [mssg] nil)
 
-(defn- process-message [{:keys [local? id game] :as mssg}]
+(defn- process-message [{:keys [persistent? id game turn] :as mssg}]
   (throw-error! (message-error mssg))
-  (let [game (if local? game (get-game id))
-        game (process-turn game mssg)]
-    (if local?
+  (let [game (if persistent? (get-game id) game)
+        game (process-turn game turn)]
+    (if persistent?
+      {:id id
+       :game-hash (hash (save-game game))}
       {:game game
-       :game-hash (hash game)}
-      {:game-hash (hash (save-game game))})))
+       :game-hash (hash game)})))
 
 (defn evaluate [mssg]
   (try
@@ -460,16 +461,16 @@
       (println)))
   (println " " (letter-guides size)))
 
-(defn show-game [{:keys [turn player prison] :as game}]
+(defn show-game [{:keys [turn-number player prison] :as game}]
   (let [red-prisoners  (format "%2d" (:red prison))
         blue-prisoners (format "%2d" (:blue prison))
         player-name    (case player :red "Red" :blue "Blue")
         color-fn       (case player :red red-txt :blue blue-txt)
-        prefix         (str turn ": " player-name)
+        prefix         (str turn-number ": " player-name)
         padding        (apply str (repeat (max 0 (- 16 (count prefix))) \space))]
     (println)
     (println
-     (str turn ": " (color-fn player-name) padding
+     (str turn-number ": " (color-fn player-name) padding
           (red-txt red-prisoners) " |" (blue-txt blue-prisoners))))
   (show-board game)
   game)
