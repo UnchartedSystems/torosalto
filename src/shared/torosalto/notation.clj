@@ -1,5 +1,6 @@
 (ns torosalto.notation
-  (:require [torosalto.rules :as rules]))
+  (:require [torosalto.rules :as rules]
+            [clojure.string :as str]))
 
 ;;;; Notation
 
@@ -29,7 +30,7 @@
    "K" 10 "L" 11 "M" 12 "N" 13 "O" 14 "P" 15 "Q" 16 "R" 17
    "S" 18 "T" 19 "U" 20 "V" 21 "W" 22 "X" 23 "Y" 24 "Z" 25})
 
-(def direction->delta
+(def dir->delta
   {"1" [-1  1] "NW" [-1  1]
    "2" [ 0  1] "N"  [ 0  1]
    "3" [ 1  1] "NE" [ 1  1]
@@ -39,11 +40,59 @@
    "8" [ 0 -1] "S"  [ 0 -1]
    "9" [ 1 -1], "SE" [ 1 -1]})
 
-;; TODO capitalize letter
 (defn interp-coords [coords]
   (let [[letter num] [(subs coords 0 1) (subs coords 1)]]
     [(get letter->x letter) (dec (parse-long num))]))
 
+(defn parse-str [s]
+  (map #(-> (str/escape % {\> " > " \+ " + "})
+            (str/split #" "))
+       (str/split s #"/")))
 
-(defn interpret [notation])
+(defn convert-place [line]
+  (and
+   (= 1 (count line))
+   (let [coords (interp-coords (first line))]
+     {:move :place
+      :details {:coords coords}})))
+
+(defn convert-free [line]
+  (and
+   (= 3 (count line))
+   (= "+" (second line))
+   (let [coords-1 (interp-coords (first line))
+         coords-2 (interp-coords (peek line))]
+     {:move :free
+      :details {:coords-1 coords-1
+                :coords-2 coords-2}})))
+
+(defn convert-hop [line]
+  (and
+   (= ">" (second line))
+   (let [coords (interp-coords (first line))
+         [place-coords? place?] (take 2 (reverse line))
+         place-coords (if (= place? "+") (interp-coords place-coords?) nil)
+         line (drop 2 line)
+         line (if place-coords (drop-last 2 line) line)]
+     (loop [[n1 n2 & ns] line
+            directions []]
+       (if (empty? ns)
+         {:coords coords
+          :place-coords place-coords
+          :directions (conj directions (get dir->delta n1))}
+         (recur ns (conj directions (get dir->delta n1))))))))
+
+(defn interpret [notation]
+  (let [lines (parse-str (str/upper-case notation))]
+    (vec
+     (for [line lines]
+       (or (convert-place line)
+           (convert-free line)
+           (convert-hop line)
+           {:error :notation/no-match})))))
+
+
+;; Absolutely thrown together
+;; No validation, no checks, messy quick code
+(interpret "C4/D5/B3/F5/C10>NW>SW>SE>NE+E5/A5+F2")
 
