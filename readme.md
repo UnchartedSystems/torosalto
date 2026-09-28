@@ -3,36 +3,42 @@
 
 An abstract strategy game for two players.
 
-## Physical Setup
+## This Repository
+
+The purpose of this project is to create a correspondence web app, a cli app, an AI harness, and an AI benchmark for ToroSalto.
+
+## Game Rules
+
+### Physical Setup
 Toro Salto is played on a regular checkerboard with even squares. The game is designed for a 10x10 board, but can be played well on an 8x8 board used for chess. Each player has a set of pieces, which are called stones. On one side of the board, a clear space is reserved for stones captured during play, this space is called the prison.
 
-## Win Condition
+### Win Condition
 A player wins by being the first to connect a line of 5 of their stones in a row. A winning line can be diagonal or orthogonal. Lines end at the boundary of the board and cannot wrap.
 
-## The Board Wraps
+### The Board Wraps
 In Toro Salto, the boundary edges of the gameboard connect to each and the gameboard wraps around. This means that a square on the right edge of the board will be adjacent to three squares the left edge as if the board had looped around. Similarly,top and bottom squares can be at adjacent, and following these rules, all corner squares are also adjacent to each other.
 
 This is relevant for hopping and placing non-adjacent stones, but this does not apply to the win condition.
 
-## How To Play
+### How To Play
 Players alternate turns throughout the game. On each turn, you must choose one of three actions: Place your stone on an empty square, hop a stone you control over other stones, or free two of your stones from prison.
 
-### Placing Stones
+#### Placing Stones
 Place a new stone on any empty square on the board that is not *blocked*. 
 
 #### Open Squares
 An *open* square is an empty square that is not *blocked* and has no stones in adjacent squares. Be mindful that adjacency wraps around the edges of the board, and so a seemingly *open* square along the boundary of a board may be adjacent to stones along the opposite boundary. The rules for *open* squares are relevant when placing a stone after a multi-hop or when freeing stones. If there are no *open* squares available on the board, then that place action is skipped.
 
-### Hopping Stones
+#### Hopping Stones
 To perform a hop, choose a stone you control on the board, and then choose an orthogonal or diagonal direction where the adjacent square contains any stone, and the following square after that is empty. Hop your stone over the adjacent stone into the following empty square; this square is now the new position of your stone. Remove the captured adjacent stone and place it in the prison. 
 
 As long as it is possible, you may choose to use that stone to perfom additional hops before the end of your turn; however, you cannot perform both diagonal and orthogonal hops within a single turn. If your first hop is diagonal, all subsequent hops must be in diagonal directions, and vice versa.
 
-#### A Single Hop Blocks a Square
+##### A Single Hop Blocks a Square
 If your turn is composed of a single hop, then the square that was hopped over becomes *blocked* for the duration of the opposing player's immediate turn. They cannot place a stone on that square, but they can freely hop a stone into that square.
 
-#### Multi-Hops Place A Stone
+##### Multi-Hops Place A Stone
 If you perform multiple hops within a turn, then you may place one stone on an *open* square before ending your turn.
 
-### Freeing Stones
+#### Freeing Stones
 Take two of your available stones from the prison, and place them on *open* squares on the board. You cannot place these two stones in adjacent squares. Freeing is only possible if the necessary stones and open spaces are available.
