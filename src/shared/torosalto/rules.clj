@@ -231,26 +231,17 @@
                x (range size)]
            [x y]))))
 
-(def open-place-mask
-  (partial cell-mask #(not (open-place-error %1 %2)) [:blue :empty]))
+(def open-place? #(not (open-place-error %1 %2)))
+(def open-place-mask (partial cell-mask open-place? [:blue :empty]))
+(def any-open-place? (partial any-cell? open-place?))
 
-(def any-open-place?
-  (partial any-cell? #(not (open-place-error %1 %2))))
+(def place? #(not (place-error %1 %2)))
+(def place-mask (partial cell-mask place? [:blue :empty]))
+(def any-place? (partial any-cell? place?))
 
-(def place-mask
-  (partial cell-mask #(not (place-error %1 %2)) [:blue :empty]))
-
-(def any-place?
-  (partial any-cell? #(not (place-error %1 %2))))
-
-(def hop-mask
-  (partial cell-mask
-           (fn [g c] (some nil? (mapv #(hop-error g c %) adjacencies)))
-           [:blue :empty]))
-
-(def any-hop?
-  (partial any-cell?
-           (fn [g c] ((some nil? (mapv #(hop-error g c %) adjacencies))))))
+(def hop? (fn [g c] (some nil? (mapv #(hop-error g c %) adjacencies))))
+(def hop-mask (partial cell-mask hop? [:blue :empty]))
+(def any-hop? (partial any-cell? hop?))
 
 ;;;; Win Condition
 
@@ -423,55 +414,3 @@
       (if-let [error (::error (ex-data e))]
         (do (println error) error)
         (throw e)))))
-
-;;;; Display
-
-(format "%3d" 99)
-
-(defn- num-guides [rows]
-  (mapv #(format "%2d" %) (range 1 (inc rows))))
-
-(defn- letter-guides [columns]
-  (subs " A B C D E F G H I J K L M N O P Q R S T U V W X Y Z"
-        0 (* columns 2)))
-
-(defn red-txt [s]
-  (str "\u001b[31m" s "\u001b[0m"))
-
-(defn blue-txt [s]
-  (str "\u001b[34m" s "\u001b[0m"))
-
-;; Add this-block to rendering
-(defn show-board [{:keys [size blocked board]}]
-  (let [nums (num-guides size)]
-    (doseq [y (reverse (range size))]
-      (print (get nums y))
-      (doseq [x (range size)]
-        (let [cell (get-in board [x y])
-              cell (if (and (= cell :empty)
-                            (= blocked [x y]))
-                     :blocked cell)]
-          (print 
-           (case cell
-             :empty   " ·"
-             :blocked " ×" 
-             :red     (red-txt " ◉")
-             :blue    (blue-txt " ◉")
-             " ?"))))
-      (println)))
-  (println " " (letter-guides size)))
-
-(defn show-game [{:keys [turn-number player prison] :as game}]
-  (let [red-prisoners  (format "%2d" (:red prison))
-        blue-prisoners (format "%2d" (:blue prison))
-        player-name    (case player :red "Red" :blue "Blue")
-        color-fn       (case player :red red-txt :blue blue-txt)
-        prefix         (str turn-number ": " player-name)
-        padding        (apply str (repeat (max 0 (- 16 (count prefix))) \space))]
-    (println)
-    (println
-     (str turn-number ": " (color-fn player-name) padding
-          (red-txt red-prisoners) " |" (blue-txt blue-prisoners))))
-  (show-board game)
-  game)
-

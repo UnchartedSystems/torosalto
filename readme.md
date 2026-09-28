@@ -1,7 +1,5 @@
 # Toro Salto
-*Torus Hop*
-
-An abstract strategy game for two players.
+*Torus Hop* ◦ An abstract strategy game for two players.
 
 ## This Repository
 

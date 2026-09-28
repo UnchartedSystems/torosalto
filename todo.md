@@ -8,6 +8,7 @@
 
 ## Build a Basic Harness
  - [ ] Research how to make a harness!
+ - [X] Make an LLM print
  - [ ] Get an LLM API hooked up? Or something?
 
 ## Make a Cli Player
@@ -25,3 +26,12 @@
 ## Add persistent API
  - [ ] Setup SQLite
  - [ ] First games, then users & salted passwords etc
+
+
+
+
+
+
+# Down The Road
+
+## Dumb AI?

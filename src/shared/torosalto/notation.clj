@@ -1,5 +1,6 @@
 (ns torosalto.notation
   (:require [torosalto.rules :as rules]
+            [torosalto.display :as display]
             [clojure.string :as str]))
 
 ;;;; Notation
@@ -102,7 +103,7 @@
      (loop [{:keys [error] :as mssg} {:game game}
             remaining turns]
        (or (when error mssg)
-           (when show? (do (rules/show-game (:game mssg)) nil))
+           (when show? (do (display/show-game (:game mssg)) nil))
            (when (empty? remaining) mssg)
            (recur (rules/evaluate
                    (assoc mssg :turn (first remaining)))
