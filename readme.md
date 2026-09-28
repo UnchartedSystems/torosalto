@@ -15,7 +15,7 @@ In Toro Salto, the boundary edges of the gameboard connect to each and the gameb
 This is relevant for hopping and placing non-adjacent stones, but this does not apply to the win condition.
 
 ## How To Play
-Players alternate turns throughout the game. On each turn, you can make one of three choices: Place your stone on an empty square, hop a stone you control over other stones, or free two of your stones from prison.
+Players alternate turns throughout the game. On each turn, you must choose one of three actions: Place your stone on an empty square, hop a stone you control over other stones, or free two of your stones from prison.
 
 ### Placing Stones
 Place a new stone on any empty square on the board that is not *blocked*. 
