@@ -5,26 +5,19 @@
 
 ;;;; Notation
 
-
-;; Notation Reference:
-;; These are the only accepted forms:
-
-;; Place
-"C10"
-;; Free
-"C10+E5"
-;; Hop
-"C10>1793"
-;; Hop & Place
-"C10>1793+E5"
-;; Turn Sequence
-"C4/D5/B3/F5/C3>97+C6/A5+F2"
-;; Optional Hop
-"C10>NW>SW>SE>NE+E5"
-
-;; Down the road:
-;; - notation for creating a game
-;; - optional player-oriented notation for winning & blocking.
+(comment
+  ;; Place
+  "C10"
+  ;; Free
+  "C10+E5"
+  ;; Hop
+  "C10>1793"
+  ;; Hop & Place
+  "C10>1793+E5"
+  ;; Turn Sequence
+  "C4/D5/B3/F5/C3>97+C6/A5+F2"
+  ;; Optional Hop
+  "C10>NW>SW>SE>NE+E5")
 
 (def letter->x
   {"A" 0 "B" 1 "C" 2 "D" 3 "E" 4 "F" 5 "G" 6 "H" 7 "I" 8 "J" 9
@@ -159,6 +152,17 @@
 
 (def board-note "3R2B3/10/8RR/3BBB1R2/5B3R/1B8/5RB3/10/4B5/10 24 B 3 0 B5")
 (display/show-game (parse-game board-note))
+
+(let [row (partition-by identity [:empty :empty :red :empty :empty :empty :blue :red :red])]
+  (reduce
+   (fn [result cell]
+     (if (= cell :empty)
+       ()
+       ()))
+   row))
+
+(defn format-game [game]
+  )
 
 (defn simulate-game
   ([game notation]

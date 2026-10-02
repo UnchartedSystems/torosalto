@@ -243,6 +243,14 @@
 (def hop-mask (partial cell-mask hop? [:blue :empty]))
 (def any-hop? (partial any-cell? hop?))
 
+;;;; Draw Condition
+;; TODO: consider repeat cycles as a draw condition
+
+(defn draw? [game]
+  (not
+   (or (any-place? game)
+       (any-hop? game))))
+
 ;;;; Win Condition
 
 ;; TODO: refactor to end evaluation on first evaluated win
@@ -268,6 +276,9 @@
 
 (defn win [{:keys [player] :as game}]
   (assoc game :winner player))
+
+(defn draw [game]
+  (assoc game :winner :draw))
 
 ;;;; Move Actions
 
@@ -370,7 +381,7 @@
    (when (:winner game)
      {:error :turn/game-already-ended
       :details {:winner (:winner game)}}))
-  
+
   (let [{:keys [winner] :as game}
         (case action
           :place (place-action game details)
@@ -380,9 +391,9 @@
            {:error :turn/invalid-action
             :details {:action action}}))]
     
-    (if winner
-       (win game)
-       (next-turn game))))
+    (or (when winner (win game))
+        (when (draw? game) (draw game))
+        (next-turn game))))
 
 ;;;; Differentiate: Server vs Local
 ;; Server uses accounts with salted auth
