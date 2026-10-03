@@ -321,7 +321,7 @@
            {:error :hops/no-directions
             :details {:directions directions}})
          
-      (when-not constraint
+         (when-not constraint
            {:error :hops/no-constraint
             :details {:directions directions}})))
     
