@@ -314,16 +314,22 @@
 
 ;; TODO: directions could be something other than seq
 (defn evaluate-hops [game coords directions]
+  (throw-error!
+   (when-not (vector? directions)
+     {:error :hops/invalid-directions
+      :details {:directions directions}}))
+  
   (let [constraint (get-constraint (first directions))
         blocked?   (= 1 (count directions))]
     (throw-error!
-     (or (when (empty? directions)
-           {:error :hops/no-directions
-            :details {:directions directions}})
-         
-         (when-not constraint
-           {:error :hops/no-constraint
-            :details {:directions directions}})))
+     (when (empty? directions)
+       {:error :hops/no-directions
+        :details {:directions directions}}))
+
+    (throw-error!
+     (when-not constraint
+       {:error :hops/no-constraint
+        :details {:directions directions}}))
     
     (loop [{:keys [game coords]} {:game game :coords coords}
            remaining directions]
@@ -382,6 +388,17 @@
      {:error :turn/game-already-ended
       :details {:winner (:winner game)}}))
 
+  (throw-error!
+   (when-not (keyword? action)
+     {:error :turn/invalid-action
+      :detail {:action action}}))
+
+  (throw-error!
+   (when-not (map? details)
+     {:error :turn/invalid-details
+      :detail {:action action
+               :details details}}))
+
   (let [{:keys [winner] :as game}
         (case action
           :place (place-action game details)
@@ -392,8 +409,10 @@
             :details {:action action}}))]
     
     (or (when winner (win game))
-        (when (draw? game) (draw game))
-        (next-turn game))))
+        (let [next-game (next-turn game)]
+          (if (draw? next-game)
+            (draw game)
+            next-game)))))
 
 ;;;; Differentiate: Server vs Local
 ;; Server uses accounts with salted auth
@@ -409,19 +428,32 @@
 (defn- message-error [mssg] nil)
 
 (defn- process-message [{:keys [persistent? id game turn] :as mssg}]
-  (throw-error! (message-error mssg))
-  (let [game (if persistent? (get-game id) game)
-        game (process-turn game turn)]
-    (if persistent?
-      {:id id
-       :game-hash (hash (save-game game))}
-      {:game game
-       :game-hash (hash game)})))
+    
+  (throw-error!
+   (when-not (map? turn)
+     {:error :message/invalid-turn}))
+ 
+  (let [game (if persistent? (get-game id) game)]
+    (throw-error!
+     (when-not (map? game)
+       {:error :message/invalid-game
+        :details? {:persistent? persistent?}}))
+    
+    (let [next-game (process-turn game turn)]
+      (if persistent?
+        {:id id
+         :game-hash (hash (save-game next-game))}
+        {:game next-game
+         :game-hash (hash next-game)}))))
 
 (defn evaluate [mssg]
   (try
+    (throw-error!
+     (when-not (map? mssg)
+       {:error :message/invalid-message}))
     (process-message mssg)
     (catch clojure.lang.ExceptionInfo e
       (if-let [error (::error (ex-data e))]
         (do (println error) error)
         (throw e)))))
+

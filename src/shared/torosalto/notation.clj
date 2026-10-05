@@ -36,83 +36,106 @@
    "19" 18 "20" 19 "21" 20 "22" 21 "23" 22 "24" 23 "25" 24 "26" 25})
 
 (def dir->delta
-  {"1" [-1  1] "NW" [-1  1]
-   "2" [ 0  1] "N"  [ 0  1]
-   "3" [ 1  1] "NE" [ 1  1]
-   "4" [-1  0] "W"  [-1  0]
-   "6" [ 1  0] "E"  [ 1  0]
-   "7" [-1 -1] "SW" [-1 -1]
-   "8" [ 0 -1] "S"  [ 0 -1]
-   "9" [ 1 -1], "SE" [ 1 -1]})
+  {"NW" [-1  1]
+   "N"  [ 0  1]
+   "NE" [ 1  1]
+   "W"  [-1  0]
+   "E"  [ 1  0]
+   "SW" [-1 -1]
+   "S"  [ 0 -1]
+   "SE" [ 1 -1]})
 
-(defn interp-coords [coords]
+(defn- square->coords [square]
   (throw-error!
-   (or (when-not (string? coords)
-         {:error :parse/input-is-not-string
-          :details {:input coords}})
+   (when-not (string? square)
+     {:error :parse/input-is-not-string
+      :details {:input square}}))
 
-       (when-not (< 1 (count coords))
-         {:error :parse/invalid-string-format
-          :details {:input coords}})))
+  (throw-error!
+   (when-not (< 1 (count square))
+     {:error :parse/invalid-string-format
+      :details {:input square}}))
   
-  (let [x (get letter->x (subs coords 0 1))
-        y (get number->y (subs coords 1))]
-    (throw-error!
-     (or (when-not x
-           {:error :parse/missing-letter
-            :detail {:coords [x y]}})
+  (let [x (get letter->x (subs square 0 1))
+        y (get number->y (subs square 1))]
 
-         (when-not y
-           {:error :parse/missing-number
-            :detail {:coords [x y]}})))
+    (throw-error!
+     (when-not x
+       {:error :parse/missing-letter
+        :detail {:coords [x y]}}))
+
+    (throw-error!
+     (when-not y
+       {:error :parse/missing-number
+        :detail {:coords [x y]}}))
+
     [x y]))
 
-(defn- parse-place [line]
-  (let [coords (interp-coords (first line))]
+(defn- parse-place [[square]]
+  (let [coords (square->coords square)]
     {:action :place
      :details {:coords coords}}))
 
-(defn- parse-free [line]
-  (let [coords-1 (interp-coords (first line))
-        coords-2 (interp-coords (peek line))]
+(defn- parse-free [[square-1 _ square-2 :as line]]
+  (throw-error!
+   (when-not (= 3 (count line))
+     {:error :parse/invalid-free-format
+      :details {:line line}}))
+  
+  (let [coords-1 (square->coords square-1)
+        coords-2 (square->coords square-2)]
     {:action :free
      :details {:coords-1 coords-1
                :coords-2 coords-2}}))
 
-(defn- parse-hop [line]
-  (let [coords (interp-coords (first line))
-        [place-coords? place?] (take 2 (reverse line))
-        place-coords (if (= place? "+") (interp-coords place-coords?) nil)
-        line (drop 2 line)
-        line (if place-coords (drop-last 2 line) line)]
-    (loop [[n1 n2 & ns] line
+ (defn- parse-hop [line]
+  (throw-error!
+   (when (even? (count line))
+     {:error :parse/invalid-hop-length
+      :details {:line line}}))
+  
+  (let [[place-square place-suffix?] (reverse line)
+        place? (= "+" place-suffix?)
+        [start-square & moves] line
+        hops (if place? (drop-last 2 moves) moves)]
+    (loop [[suffix direction & hops] hops
            directions []]
-      (if (empty? ns)
+      
+      (throw-error!
+       (when-not (= ">" suffix)
+         {:error :place/invalid-hop-suffix
+          :details {:direction direction
+                    :line line}}))
+      
+      (throw-error!
+       (when-not (get dir->delta direction)
+         {:error :place/invalid-hop-direction
+          :details {:direction direction
+                    :line line}}))
+      
+      (if (empty? hops)
         {:action :hop
-         :details {:coords coords
-                   :place-coords place-coords
-                   :directions (conj directions (get dir->delta n1))}}
-        (recur ns (conj directions (get dir->delta n1))))))) 
+         :details {:coords (square->coords start-square)
+                   :place-coords (when place? (square->coords place-square))
+                   :directions (conj directions (get dir->delta direction))}}
+        (recur hops (conj directions (get dir->delta direction)))))))
 
-(defn- split-turns [s]
+(defn- split-moves [s]
   (mapv #(vec (re-seq #"[^>+\s]+|[>+]" %))
         (str/split s #"/")))
 
-;; TODO: add untrusted input validation, checks, QOL impr.
 (defn- parse-turns [notation]
   (throw-error! (when-not (string? notation)
                   {:error :parse/notation-not-string
                    :details {:notation notation}}))
-  (let [moves (split-turns (str/upper-case notation))]
-    
-    (vec
-     (for [move moves]
-       (cond (= 1 (count line)) (parse-place move)
-             (and (= 3 (count line)) (= "+" (second line))) (parse-free move)
-             (= ">" (second line)) (parse-hop move)
-             :else {:error :notation/no-match
-                    :details {:move move
-                              :moves moves}})))))
+  (vec
+   (for [[_ suffix :as turn] (split-moves (str/upper-case notation))]
+     (cond (= 1 (count turn)) (parse-place turn)
+           (= "+" suffix) (parse-free turn)
+           (= ">" suffix) (parse-hop turn)
+           :else (throw-error!
+                  {:error :parse/invalid-notation
+                   :details {:turn turn}})))))
 
 (defn interpret-turns [notation]
   (try
@@ -168,7 +191,7 @@
         player (case pl "B" :blue "R" :red)
         red-prisoners (parse-long r-p)
         blue-prisoners (parse-long b-p)
-        blocked (when b (interp-coords b))]
+        blocked (when b (square->coords b))]
     (if-let [size (verify-size board)]
       {:size size
        :turn-number turn-number
@@ -190,34 +213,25 @@
         (do (println error) error)
         (throw e)))))
 
-(def board-note "3R2B3/10/8RR/3BBB1R2/5B3R/1B8/5RB3/10/4B5/10 24 B 3 0 B5")
-(display/show-game (parse-game board-note))
-
-(let [row (partition-by identity [:empty :empty :red :empty :empty :empty :blue :red :red])]
-  (reduce
-   (fn [result cell]
-     (if (= cell :empty)
-       ()
-       ()))
-   row))
-
-(defn format-game [game]
-  )
+(comment (def board-note "3R2B3/10/8RR/3BBB1R2/5B3R/1B8/5RB3/10/4B5/10 24 B 3 0 B5")
+         (display/show-game (parse-game board-note)))
 
 (defn simulate-game
-  ([game notation]
-   (simulate-game game false notation))
+  ([game turns]
+   (simulate-game game false turns))
   
-  ([game show? notation]
-   (let [turns (parse-turns notation)]
-     (loop [{:keys [error] :as mssg} {:game game}
-            remaining turns]
-       (or (when error mssg)
-           (when show? (do (display/show-game (:game mssg)) nil))
-           (when (empty? remaining) mssg)
-           (recur (rules/evaluate
-                   (assoc mssg :turn (first remaining)))
-                  (rest remaining)))))))
+  ([game show? turns]
+   (loop [{:keys [error] :as mssg} {:game game}
+          remaining turns]
+     (or (when error mssg)
+         (when show? (do (display/show-game (:game mssg)) nil))
+         (when (empty? remaining) mssg)
+         (recur (rules/evaluate
+                 (assoc mssg :turn (first remaining)))
+                (rest remaining))))))
 
-#_(simulate-game (rules/make-game) true "C4/D5/B3/D4/H8/D4>W>S+J1/H2+B7/C4")
-
+(comment
+  (let [result (interpret-turns "C4/D5/B3/D4/H8/D4>W>S+J1/H2+B7/C4")]
+    (if (:error result)
+      result
+      (simulate-game (rules/make-game) true result))))
