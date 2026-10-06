@@ -120,10 +120,7 @@
               (<= 0 y) (< y size)))))
 
 (defn position-error [coords size]
-  (or (when-not (vector? coords)
-        {:error :position/invalid
-         :details {:coords coords}})
-      (when-not (= 2 (count coords))
+  (or (when-not vector? (coords) 
         {:error :position/invalid
          :details {:coords coords}})
       (when-not (legal-position? coords size)
@@ -151,7 +148,6 @@
           {:error :open-place/not-open
            :details {:coords coords
                      :stones adj-stones}}))))
-
 
 (defn free-error [{:keys [size player prison board] :as game} coords-1 coords-2]
   (or (open-place-error game coords-1)

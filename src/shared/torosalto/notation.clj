@@ -49,12 +49,12 @@
   (throw-error!
    (when-not (string? square)
      {:error :parse/input-is-not-string
-      :details {:input square}}))
+      :details {:square square}}))
 
   (throw-error!
    (when-not (< 1 (count square))
      {:error :parse/invalid-string-format
-      :details {:input square}}))
+      :details {:square square}}))
   
   (let [x (get letter->x (subs square 0 1))
         y (get number->y (subs square 1))]
@@ -79,7 +79,7 @@
 (defn- parse-free [[square-1 _ square-2 :as line]]
   (throw-error!
    (when-not (= 3 (count line))
-     {:error :parse/invalid-free-format
+     {:error :parse-turn/invalid-free-format
       :details {:line line}}))
   
   (let [coords-1 (square->coords square-1)
@@ -91,7 +91,7 @@
  (defn- parse-hop [line]
   (throw-error!
    (when (even? (count line))
-     {:error :parse/invalid-hop-length
+     {:error :parse-turn/invalid-hop-length
       :details {:line line}}))
   
   (let [[place-square place-suffix?] (reverse line)
@@ -103,13 +103,13 @@
       
       (throw-error!
        (when-not (= ">" suffix)
-         {:error :place/invalid-hop-suffix
+         {:error :place-turn/invalid-hop-suffix
           :details {:direction direction
                     :line line}}))
       
       (throw-error!
        (when-not (get dir->delta direction)
-         {:error :place/invalid-hop-direction
+         {:error :place-turn/invalid-hop-direction
           :details {:direction direction
                     :line line}}))
       
@@ -126,7 +126,7 @@
 
 (defn- parse-turns* [notation]
   (throw-error! (when-not (string? notation)
-                  {:error :parse/notation-not-string
+                  {:error :parse-turn/notation-not-string
                    :details {:notation notation}}))
   (vec
    (for [[_ suffix :as turn] (split-moves (str/upper-case notation))]
@@ -134,7 +134,7 @@
            (= "+" suffix) (parse-free turn)
            (= ">" suffix) (parse-hop turn)
            :else (throw-error!
-                  {:error :parse/invalid-notation
+                  {:error :parse-turn/invalid-notation
                    :details {:turn turn}})))))
 
 (defn parse-turns [notation]
@@ -147,8 +147,9 @@
 
 (comment
   ;; Board Notation
-  "3R2B3/10/8RR/3BBB1R2/5B3R/1B8/5RB3/10/4B5/10 24 B R3B0 XB5"
+  "3R2B3/10/8RR/3BBB1R2/5B3R/1B8/5RB3/10/4B5/10 @ 24 B R3B0 XB5"
   ;; Spaces signify metadata
+  "@" ;; metadata suffix
   "24" ;; turn 24
   "B" ;; who's turn is it
   "S10" ;; What is the size
@@ -158,8 +159,22 @@
 
 
 (defn- split-game [game]
+  (throw-error!
+   (when-not (string? game)
+     {:error :parse-game/invalid-game
+      :details {:data game}}))
+  
   (-> game
       (str/upper-case)
+      (str/split #"@")))
+
+(defn- split-metadata [data]
+  (throw-error!
+   (when-not (string? data)
+     {:error :parse-game/invalid-metadata
+      :details {:data data}}))
+  
+  (-> data
       (str/trim)
       (str/split #" ")))
 
@@ -184,7 +199,8 @@
    board))
 
 (defn- parse-game* [notation]
-  (let [[board-notation t pl r-p b-p b] (split-game notation)
+  (let [[board-notation metadata] (split-game notation)
+        [t pl r-p b-p b] (split-metadata metadata)
         rows (split-rows board-notation)
         board (convert-rows rows)
         turn-number (parse-long t)
@@ -213,8 +229,10 @@
         (do (println error) error)
         (throw e)))))
 
-(comment (def board-note "3R2B3/10/8RR/3BBB1R2/5B3R/1B8/5RB3/10/4B5/10 24 B 3 0 B5")
-         (display/show-game (parse-game board-note)))
+(comment (let [board-note "3R2B3/10/8RR/3BBB1R2/5B3R/1B8/5RB3/10/4B5/10 @ 24 B 3 0 B5"]
+           (display/show-game (parse-game board-note))))
+
+(parse-game "3R2B3/10/8RR/3BBB1R2/5B3R/1B8/5RB3/10/4B5/10 @ 24 B 3 0 B5")
 
 (defn simulate-game
   ([game turns]
@@ -231,7 +249,8 @@
                 (rest remaining))))))
 
 (comment
-  (let [result (parse-turns "C4/D5/B3/D4/H8/D4>W>S+J1/H2+B7/C4")]
+  (let [result (parse-turns "C4/D5/B3/D4/H8/D4>W>S+J1/H2+B7/C4")
+        game (parse-game "3R2B3/10/8RR/3BBB1R2/5B3R/1B8/5RB3/10/4B5/10 @ 24 B 3 0 B5")]
     (if (:error result)
       result
-      (simulate-game (rules/make-game) true result))))
+      (display/show-game (:game (rules/process-message {:game game :turn (first result)}))))))

@@ -2,7 +2,10 @@
 
  :deps
  {org.clojure/clojure
-  {:mvn/version "1.12.0"}}
+  {:mvn/version "1.12.0"}
+  metosin/malli
+  {:mvn/version "0.20.2"}}
+ 
 
  :aliases
  {:server
