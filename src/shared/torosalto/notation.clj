@@ -62,12 +62,12 @@
     (throw-error!
      (when-not x
        {:error :parse/missing-letter
-        :detail {:coords [x y]}}))
+        :details {:coords [x y]}}))
 
     (throw-error!
      (when-not y
        {:error :parse/missing-number
-        :detail {:coords [x y]}}))
+        :details {:coords [x y]}}))
 
     [x y]))
 
@@ -124,7 +124,7 @@
   (mapv #(vec (re-seq #"[^>+\s]+|[>+]" %))
         (str/split s #"/")))
 
-(defn- parse-turns [notation]
+(defn- parse-turns* [notation]
   (throw-error! (when-not (string? notation)
                   {:error :parse/notation-not-string
                    :details {:notation notation}}))
@@ -137,9 +137,9 @@
                   {:error :parse/invalid-notation
                    :details {:turn turn}})))))
 
-(defn interpret-turns [notation]
+(defn parse-turns [notation]
   (try
-    (parse-turns notation)
+    (parse-turns* notation)
     (catch clojure.lang.ExceptionInfo e
       (if-let [error (::error (ex-data e))]
         (do (println error) error)
@@ -183,7 +183,7 @@
    (count board)
    board))
 
-(defn- parse-game [notation]
+(defn- parse-game* [notation]
   (let [[board-notation t pl r-p b-p b] (split-game notation)
         rows (split-rows board-notation)
         board (convert-rows rows)
@@ -205,9 +205,9 @@
       {:error :parse/inconsistent-size
        :details {:board board}})))
 
-(defn interpret-game [notation]
+(defn parse-game [notation]
   (try
-    (parse-game notation)
+    (parse-game* notation)
     (catch clojure.lang.ExceptionInfo e
       (if-let [error (::error (ex-data e))]
         (do (println error) error)
@@ -226,12 +226,12 @@
      (or (when error mssg)
          (when show? (do (display/show-game (:game mssg)) nil))
          (when (empty? remaining) mssg)
-         (recur (rules/evaluate
+         (recur (rules/process-message
                  (assoc mssg :turn (first remaining)))
                 (rest remaining))))))
 
 (comment
-  (let [result (interpret-turns "C4/D5/B3/D4/H8/D4>W>S+J1/H2+B7/C4")]
+  (let [result (parse-turns "C4/D5/B3/D4/H8/D4>W>S+J1/H2+B7/C4")]
     (if (:error result)
       result
       (simulate-game (rules/make-game) true result))))

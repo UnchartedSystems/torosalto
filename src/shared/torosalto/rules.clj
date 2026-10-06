@@ -382,7 +382,7 @@
          :next-blocked nil))
 
 ;; TODO: process draws!
-(defn- process-turn [game {:keys [action details] :as turn}]
+(defn- process-turn* [game {:keys [action details] :as turn}]
   (throw-error!
    (when (:winner game)
      {:error :turn/game-already-ended
@@ -391,12 +391,12 @@
   (throw-error!
    (when-not (keyword? action)
      {:error :turn/invalid-action
-      :detail {:action action}}))
+      :details {:action action}}))
 
   (throw-error!
    (when-not (map? details)
      {:error :turn/invalid-details
-      :detail {:action action
+      :details {:action action
                :details details}}))
 
   (let [{:keys [winner] :as game}
@@ -414,6 +414,17 @@
             (draw game)
             next-game)))))
 
+(defn process-turn [turn]
+  (try
+    (throw-error!
+     (when-not (map? turn)
+       {:error :turn/invalid-turn}))
+    (process-turn* turn)
+    (catch clojure.lang.ExceptionInfo e
+      (if-let [error (::error (ex-data e))]
+        (do (println error) error)
+        (throw e)))))
+
 ;;;; Differentiate: Server vs Local
 ;; Server uses accounts with salted auth
 ;; Server pulls its own copy of the game from SQLite
@@ -427,7 +438,7 @@
 ;; Validates Message Inputs
 (defn- message-error [mssg] nil)
 
-(defn- process-message [{:keys [persistent? id game turn] :as mssg}]
+(defn- process-message* [{:keys [persistent? id game turn] :as mssg}]
     
   (throw-error!
    (when-not (map? turn)
@@ -437,21 +448,21 @@
     (throw-error!
      (when-not (map? game)
        {:error :message/invalid-game
-        :details? {:persistent? persistent?}}))
+        :details {:persistent? persistent?}}))
     
-    (let [next-game (process-turn game turn)]
+    (let [next-game (process-turn* game turn)]
       (if persistent?
         {:id id
          :game-hash (hash (save-game next-game))}
         {:game next-game
          :game-hash (hash next-game)}))))
 
-(defn evaluate [mssg]
+(defn process-message [mssg]
   (try
     (throw-error!
      (when-not (map? mssg)
        {:error :message/invalid-message}))
-    (process-message mssg)
+    (process-message* mssg)
     (catch clojure.lang.ExceptionInfo e
       (if-let [error (::error (ex-data e))]
         (do (println error) error)
