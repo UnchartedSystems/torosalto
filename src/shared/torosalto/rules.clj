@@ -1,4 +1,6 @@
-(ns torosalto.rules)
+(ns torosalto.rules
+  (:require [torosalto.schema :as schema]
+            [malli.core :as m]))
 
 ;; Cell States
 (def cell-states #{:empty :red :blue})
@@ -120,10 +122,7 @@
               (<= 0 y) (< y size)))))
 
 (defn position-error [coords size]
-  (or (when-not vector? (coords) 
-        {:error :position/invalid
-         :details {:coords coords}})
-      (when-not (legal-position? coords size)
+  (or (when-not (legal-position? coords size)
         {:error :position/invalid
          :details {:coords coords}})))
 
@@ -172,10 +171,9 @@
   ([game coords direction]
    (hop-error game coords direction adjacencies))
   
-  ([{:keys [size player board]} coords direction constraint]
+  ([{:keys [size player board]} coords direction]
    (or (position-error coords size)
        
-       ;; the hop cell a stone should be controlled by the player?
        (let [cell (get-in board coords)]
          (when (not= cell player)
            {:error :hop/invalid-start
@@ -307,33 +305,23 @@
                         (assoc-in hopped-coords :empty)
                         (assoc-in landing-coords attacker)))})))
 
+(def Directions
+  [:or
+   [:vector {:min 1} Diagonal]
+   [:vector {:min 1} Orthogonal]])
 
-;; TODO: directions could be something other than seq
 (defn evaluate-hops [game coords directions]
   (throw-error!
-   (when-not (vector? directions)
-     {:error :hops/invalid-directions
+   (m/validate Directions directions
+     {:error :hops/not-orthogonal-or-diagonal
       :details {:directions directions}}))
   
-  (let [constraint (get-constraint (first directions))
-        blocked?   (= 1 (count directions))]
-    (throw-error!
-     (when (empty? directions)
-       {:error :hops/no-directions
-        :details {:directions directions}}))
-
-    (throw-error!
-     (when-not constraint
-       {:error :hops/no-constraint
-        :details {:directions directions}}))
-    
-    (loop [{:keys [game coords]} {:game game :coords coords}
-           remaining directions]
+  (let [blocked?   (= 1 (count directions))]
+    (loop [{:keys [game coords]} {:game game :coords coords} remaining directions]
       (or
        (when (win? game coords)
          (assoc game :winner (:player game)))
        (when (empty? remaining) game)
-       (throw-error! (hop-error game coords (first remaining) constraint))
        (recur (hop game coords (first remaining) blocked?)
               (rest remaining))))))
 
@@ -379,45 +367,32 @@
 
 ;; TODO: process draws!
 (defn- process-turn* [game {:keys [action details] :as turn}]
+  (schema/throw-violation! schema/Game game)
+   
   (throw-error!
    (when (:winner game)
      {:error :turn/game-already-ended
       :details {:winner (:winner game)}}))
 
-  (throw-error!
-   (when-not (keyword? action)
-     {:error :turn/invalid-action
-      :details {:action action}}))
-
-  (throw-error!
-   (when-not (map? details)
-     {:error :turn/invalid-details
-      :details {:action action
-               :details details}}))
-
   (let [{:keys [winner] :as game}
         (case action
           :place (place-action game details)
           :free (free-action game details)
-          :hop (hop-action game details)
-          (throw-error!
-           {:error :turn/invalid-action
-            :details {:action action}}))]
-    
+          :hop (hop-action game details))]
+
     (or (when winner (win game))
         (let [next-game (next-turn game)]
           (if (draw? next-game)
             (draw game)
             next-game)))))
 
-(defn process-turn [turn]
+(defn process-turn [game turn]
   (try
-    (throw-error!
-     (when-not (map? turn)
-       {:error :turn/invalid-turn}))
-    (process-turn* turn)
+    (schema/throw-violation! schema/Turn turn)
+    (process-turn* game turn)
     (catch clojure.lang.ExceptionInfo e
-      (if-let [error (::error (ex-data e))]
+      (if-let [error (or (::schema/error (ex-data e))
+                         (::error (ex-data e)))]
         (do (println error) error)
         (throw e)))))
 
@@ -435,32 +410,21 @@
 (defn- message-error [mssg] nil)
 
 (defn- process-message* [{:keys [persistent? id game turn] :as mssg}]
-    
-  (throw-error!
-   (when-not (map? turn)
-     {:error :message/invalid-turn}))
- 
-  (let [game (if persistent? (get-game id) game)]
-    (throw-error!
-     (when-not (map? game)
-       {:error :message/invalid-game
-        :details {:persistent? persistent?}}))
-    
-    (let [next-game (process-turn* game turn)]
-      (if persistent?
-        {:id id
-         :game-hash (hash (save-game next-game))}
-        {:game next-game
-         :game-hash (hash next-game)}))))
+  (let [game (if persistent? (get-game id) game)
+        next-game (process-turn* game turn)]
+    (if persistent?
+      {:id id
+       :game-hash (hash (save-game next-game))}
+      {:game next-game
+       :game-hash (hash next-game)})))
 
 (defn process-message [mssg]
   (try
-    (throw-error!
-     (when-not (map? mssg)
-       {:error :message/invalid-message}))
+    (schema/throw-violation! schema/Message mssg)
     (process-message* mssg)
     (catch clojure.lang.ExceptionInfo e
-      (if-let [error (::error (ex-data e))]
+      (if-let [error (or (::schema/error (ex-data e))
+                         (::error (ex-data e)))]
         (do (println error) error)
         (throw e)))))
 

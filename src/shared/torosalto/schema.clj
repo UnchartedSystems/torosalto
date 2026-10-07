@@ -3,6 +3,12 @@
             [malli.error :as me]
             [malli.generator :as mg]))
 
+(defn throw-violation! [schema instance]
+  (if-let [violation (m/explain schema instance)]
+    (throw
+     (ex-info (str "Schema Violation. ")
+              {::error (me/humanize violation)}))))
+
 ;; Cell States
 (def cell-states #{:empty :red :blue})
 (def stones #{:red :blue})
@@ -26,7 +32,7 @@
 (def Stone
   (into [:enum] stones))
 
-(def Adjacency
+(def Adjacencies
   (into [:enum] adjacencies))
 
 (def Orthogonal
@@ -66,6 +72,12 @@
     :details {:coords-1 [7 1]
               :coords-2 [1 6]}}))
 
+;; constraint checking is done seperately than schema checking.
+(def Directions
+  [:or
+   [:vector {:min 1} Diagonal]
+   [:vector {:min 1} Orthogonal]])
+
 (def Hop
   [:map
    [:action [:= :hop]]
@@ -74,9 +86,13 @@
      [:coords Coords]
      [:place-coords Coords]
      [:directions
-      [:or
-       [:vector {:min 1} Orthogonal]
-       [:vector {:min 1} Diagonal]]]]]])
+      [:vector {:min 1} Adjacencies]]]]])
+
+(def Turn
+  [:multi {:dispatch :action}
+   [:place Place]
+   [:free Free]
+   [:hop Hop]])
 
 (comment
   (m/validate
@@ -118,30 +134,9 @@
         (mapv (fn [n] [n (game-schema-for-size n)])
               game-sizes)))
 
-(comment
-  (->
-   (m/explain
-    Game
-    {:size 10
-     :turn-number 24
-     :blocked [1 4]
-     :next-blocked [4 0]
-     :version 0
-     :player :blue
-     :prison {:red 3 :blue 0}
-     :board
-     [[:empty :empty :empty :red :empty :empty :blue :empty :empty :empty]
-      [:empty :empty :empty :empty :empty :empty :empty :empty :empty :empty]
-      [:empty :empty :empty :empty :empty :empty :empty :empty :red :red]
-      [:empty :empty :empty :blue :blue :blue :empty :red :empty :empty]
-      [:empty :empty :empty :empty :empty :blue :empty :empty :empty :red]
-      [:empty :blue :empty :empty :empty :empty :empty :empty :empty :empty]
-      [:empty :empty :empty :empty :empty :red :blue :empty :empty :empty]
-      [:empty :empty :empty :empty :empty :empty :empty :empty :empty :empty]
-      [:empty :empty :empty :empty :blue :empty :empty :empty :empty :empty]
-      [:empty :empty :empty :empty :empty :empty :empty :empty :empty :empty]]})
-   (me/humanize)))
-
-
-(comment
-  {:game game :turn place-action})
+(def Message
+  [:map
+   [:turn Turn]
+   [:game {:optional true} :map]
+   [:persistent? {:optional true} :boolean]
+   [:id {:optional true} :in]])
