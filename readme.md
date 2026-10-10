@@ -13,6 +13,8 @@ Toro Salto is played on a regular checkerboard with even squares. The game is de
 ### Win Condition
 A player wins by being the first to connect a line of 5 of their stones in a row. A winning line can be diagonal or orthogonal. Lines end at the boundary of the board and cannot wrap.
 
+If no action is possible at the start of a turn, the game is a draw.
+
 ### The Board Wraps
 In Toro Salto, the boundary edges of the gameboard connect to each and the gameboard wraps around. This means that a square on the right edge of the board will be adjacent to three squares the left edge as if the board had looped around. Similarly,top and bottom squares can be at adjacent, and following these rules, all corner squares are also adjacent to each other.
 

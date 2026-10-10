@@ -7,7 +7,11 @@
   (if-let [violation (m/explain schema instance)]
     (throw
      (ex-info (str "Schema Violation. ")
-              {::error (me/humanize violation)}))))
+              {::error {:error :schema/violation
+                        :details (me/humanize violation)}}))))
+
+;; Safe Max Int
+(def safe-max 10000000000)
 
 ;; Cell States
 (def cell-states #{:empty :red :blue})
@@ -72,7 +76,7 @@
     :details {:coords-1 [7 1]
               :coords-2 [1 6]}}))
 
-;; constraint checking is done seperately than schema checking.
+;; Not included in Hop, used for legality error checking.
 (def Directions
   [:or
    [:vector {:min 1} Diagonal]
@@ -84,7 +88,7 @@
    [:details
     [:map
      [:coords Coords]
-     [:place-coords Coords]
+     [:place-coords {:optional true} [:or Coords [:enum false nil]]]
      [:directions
       [:vector {:min 1} Adjacencies]]]]])
 
@@ -116,15 +120,16 @@
   (let [coords (bounded-coords n)]
     [:map
      [:size [:= n]]
-     [:turn-number [:int {:min 1}]]
+     [:turn-number [:int {:min 1 :max safe-max}]]
      [:blocked [:or coords [:enum false nil]]]
-     [:next-blocked [:or coords [:enum false nil]]]
+     [:next-blocked {:optional true} :nil]
      [:version [:= 0]]
+     [:winner {:optional true} [:enum :red :blue :draw]]
      [:player Stone]
      [:prison
       [:map
-       [:red [:int {:min 0}]]
-       [:blue [:int {:min 0}]]]]
+       [:red [:int {:min 0 :max safe-max}]]
+       [:blue [:int {:min 0 :max safe-max}]]]]
      [:board (board-schema n)]]))
 
 (def game-sizes [8 10])
@@ -139,4 +144,4 @@
    [:turn Turn]
    [:game {:optional true} :map]
    [:persistent? {:optional true} :boolean]
-   [:id {:optional true} :in]])
+   [:id {:optional true} :int]])

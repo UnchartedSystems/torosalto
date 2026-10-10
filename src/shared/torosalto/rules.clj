@@ -12,14 +12,6 @@
     [0 -1]         [0 1]
     [-1 -1] [-1 0] [-1 1]})
 
-(def diagonal
-  #{[1 -1]  [1 1]
-    [-1 -1] [-1 1]})
-
-(def orthogonal
-  #{[1 0] [0 1] [-1 0] [0 -1]})
-
-
 ;;;; Board Creation
 
 (defn- populate-board [game cells]
@@ -101,10 +93,7 @@
            (mapv #(vector % (get-in board (move coords % size)))
                  adjacencies)))
 
-(defn get-constraint [direction]
-  (cond (diagonal direction)   diagonal
-        (orthogonal direction) orthogonal
-        :else false))
+
 
 ;;;; Legality Checks
 
@@ -167,44 +156,34 @@
          {:coords-1 coords-1
           :coords-2 coords-2}})))
 
-(defn hop-error
-  ([game coords direction]
-   (hop-error game coords direction adjacencies))
-  
-  ([{:keys [size player board]} coords direction]
-   (or (position-error coords size)
-       
-       (let [cell (get-in board coords)]
-         (when (not= cell player)
-           {:error :hop/invalid-start
-            :details {:player player
-                      :cell cell}}))
-       
-       ;; the hop direction should be adjacent / diagonal / orthogonal
-       (when-not (constraint direction)
-         {:error :hop/broken-constraint
-          :details {:direction direction
-                    :constraint constraint}})
-       
-       ;; the hopped-over cell should be a stone
-       (let [hopped-coords (move coords direction size)
-             hopped-cell (get-in board hopped-coords)]
-         (when (= hopped-cell :empty)
-           {:error :hop/hopped-cell-empty
-            :details {:start-coords coords
-                      :direction direction
-                      :hopped-coords hopped-coords
-                      :hopped-cell hopped-cell}}))
-       
-       ;; is the hop landing cell should be empty
-       (let [dest-coords (move coords (v* 2 direction) size)
-             dest-cell (get-in board dest-coords)]
-         (when (stones dest-cell)
-           {:error :hop/destination-is-full
-            :details {:start-coords coords
-                      :direction direction
-                      :dest-coords dest-coords
-                      :dest-cell dest-cell}})))))
+(defn hop-error [{:keys [size player board]} coords direction]
+  (or (position-error coords size)
+      
+      (let [cell (get-in board coords)]
+        (when (not= cell player)
+          {:error :hop/invalid-start
+           :details {:player player
+                     :cell cell}}))
+      
+      ;; the hopped-over cell should be a stone
+      (let [hopped-coords (move coords direction size)
+            hopped-cell (get-in board hopped-coords)]
+        (when (= hopped-cell :empty)
+          {:error :hop/hopped-cell-empty
+           :details {:start-coords coords
+                     :direction direction
+                     :hopped-coords hopped-coords
+                     :hopped-cell hopped-cell}}))
+      
+      ;; is the hop landing cell should be empty
+      (let [dest-coords (move coords (v* 2 direction) size)
+            dest-cell (get-in board dest-coords)]
+        (when (stones dest-cell)
+          {:error :hop/destination-is-full
+           :details {:start-coords coords
+                     :direction direction
+                     :dest-coords dest-coords
+                     :dest-cell dest-cell}}))))
 
 ;;;; Cell Masks
 
@@ -269,10 +248,14 @@
          (<= 5))))
 
 (defn win [{:keys [player] :as game}]
-  (assoc game :winner player))
+  (assoc game
+         :winner player
+         :next-blocked nil))
 
 (defn draw [game]
-  (assoc game :winner :draw))
+  (assoc game
+         :winner :draw
+         :next-blocked nil))
 
 ;;;; Move Actions
 
@@ -305,26 +288,22 @@
                         (assoc-in hopped-coords :empty)
                         (assoc-in landing-coords attacker)))})))
 
-(def Directions
-  [:or
-   [:vector {:min 1} Diagonal]
-   [:vector {:min 1} Orthogonal]])
-
 (defn evaluate-hops [game coords directions]
   (throw-error!
-   (m/validate Directions directions
+   (when-not (m/validate schema/Directions directions)
      {:error :hops/not-orthogonal-or-diagonal
       :details {:directions directions}}))
   
-  (let [blocked?   (= 1 (count directions))]
-    (loop [{:keys [game coords]} {:game game :coords coords} remaining directions]
+  (let [blocked? (= 1 (count directions))]
+    (loop [{:keys [game coords]} {:game game :coords coords}
+           remaining directions]
       (or
        (when (win? game coords)
          (assoc game :winner (:player game)))
        (when (empty? remaining) game)
+       (throw-error! (hop-error game coords (first remaining)))
        (recur (hop game coords (first remaining) blocked?)
               (rest remaining))))))
-
 
 (defn place-action [game {:keys [coords]}]
   (throw-error! (place-error game coords))
@@ -427,4 +406,16 @@
                          (::error (ex-data e)))]
         (do (println error) error)
         (throw e)))))
+
+(comment
+  (process-message
+   {:version 0
+    :persistent? false
+    :game test-game
+    :turn {:action :hop
+           :details {:coords [9 9]
+                     :place-coords [2 8]
+                     :directions [[0 -1]
+                                  [-1 0]
+                                  [0 1]]}}}))
 
