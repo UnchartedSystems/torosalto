@@ -16,9 +16,10 @@
 		- Maybe it takes notation as an input?
 
 ## Finish Notation
- - [ ] Add untrusted input validation (difficult)
- - [ ] Enable input notation to have cosmetic spaces & newlines
- - [ ] Add error feedback for broken notation
+ - [X] Add untrusted input validation
+ - [X] Enable input notation to have cosmetic spaces & newlines
+ - [X] Add error feedback for broken notation
+ - [X] Convert both ways between notation and turns/game snapshots
 
 ## Add highlight layers for visualization
  - [ ] Can take arbitrary masks

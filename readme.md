@@ -5,6 +5,75 @@
 
 The purpose of this project is to create a correspondence web app, a cli app, an AI harness, and an AI benchmark for ToroSalto.
 
+## Notation
+
+`torosalto.notation` converts notation to data and data to canonical notation:
+
+| Parse | Format | Value |
+| --- | --- | --- |
+| `parse-turn` | `format-turn` | One turn map |
+| `parse-turns` | `format-turns` | A sequence of turns; parsing returns a vector |
+| `parse-game` | `format-game` | A board snapshot |
+
+Turn notation uses one-based squares from `A1` through `Z26`:
+
+- Place: `C10`
+- Free: `C10+E5`
+- Hop: `C10>NW>SW`
+- Hop and place: `C10>NW>SW+E5`
+- Turn sequence: `C4/D5/B3/F5/C3>NW>NE+C6/A5+F2`
+
+Directions are `NW`, `N`, `NE`, `W`, `E`, `SW`, `S`, and `SE`.
+Input is case-insensitive and allows spaces, tabs, and newlines between tokens.
+A square such as `C10` is one token; `C 10` is invalid. Empty or whitespace-only
+input to `parse-turns` returns `[]`, and formatting an empty sequence returns
+`""`. Empty turns within a sequence and trailing `/` separators are invalid.
+
+Board snapshots use positive numbers for runs of empty cells and `R`/`B` for
+stones, followed by metadata:
+
+```text
+1R6/8/8/8/8/8/8/5B2 @ 7 B 3 4 B2
+board @ turn-number player red-prisoners blue-prisoners [blocked-square]
+```
+
+For compatibility, slash-separated board segments are **columns**, starting
+with A; cells in each column start at square 1 and continue upward. The example
+places a red stone at A2 and a blue stone at H6, with B2 blocked. Only 8×8 and
+10×10 snapshots are supported. Size is inferred from the number of columns.
+Formatting combines empty runs and emits uppercase text with single spaces in
+the metadata. Numbers and squares must remain intact when adding whitespace.
+
+```clojure
+(require '[torosalto.notation :as notation])
+
+(notation/parse-turn "c10 > nw > sw + e5")
+;; => {:action :hop, :details {:coords [2 9],
+;;                            :directions [[-1 1] [-1 -1]],
+;;                            :place-coords [4 4]}}
+
+(notation/format-turns (notation/parse-turns "a1 / b2"))
+;; => "A1/B2"
+```
+
+All six converters return `{:error keyword :details ... :operation keyword}`
+on invalid input, without printing. Errors distinguish invalid syntax,
+schema violations, and data the notation cannot represent. Formatting rejects
+extra fields and snapshots containing a winner or non-nil `next-blocked`, so
+state is never silently discarded. Snapshot version is always 0. Missing,
+nil, or false optional coordinates normalize to nil; missing `next-blocked`
+normalizes to nil. Round trips preserve data with these normalizations.
+
+Conversion validates syntax and representation. `torosalto.rules` determines
+whether a turn is legal for a particular game, including its board bounds and
+whether hops mix orthogonal and diagonal directions.
+
+Run the notation regression and generated round-trip tests with:
+
+```sh
+clojure -M:test
+```
+
 ## Game Rules
 
 ### Physical Setup

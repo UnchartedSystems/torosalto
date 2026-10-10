@@ -8,7 +8,11 @@
  
 
  :aliases
- {:server
+ {:test
+  {:extra-paths ["test"]
+   :main-opts ["-m" "torosalto.test-runner"]}
+
+  :server
   {:extra-paths ["src/server"]
    :main-opts ["=m" "torosalto.server"]}
 
