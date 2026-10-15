@@ -4,7 +4,7 @@
             [torosalto.schema :as schema]
             [malli.core :as m]
             [malli.error :as me]
-            [clojure.string :as str]))
+            [clojure.string :as string]))
 
 (defn- throw-error! [error]
   (throw (ex-info (str "Invalid Notation: " (:error error)) {::error error})))
@@ -18,14 +18,6 @@
         (assoc error :operation operation)
         (throw e)))))
 
-(defn- require-representable! [s value]
-  (try
-    (schema/throw-violation! s value)
-    (catch clojure.lang.ExceptionInfo e
-      (if-let [error (::schema/error (ex-data e))]
-        (throw-error! (assoc error :error :notation/unrepresentable))
-        (throw e)))))
-
 (def letter->x
   (zipmap (map str "ABCDEFGHIJKLMNOPQRSTUVWXYZ") (range 26)))
 
@@ -36,6 +28,7 @@
   {"NW" [-1  1] "N" [0 1] "NE" [1 1]
    "W"  [-1  0]             "E"  [1 0]
    "SW" [-1 -1] "S" [0 -1] "SE" [1 -1]})
+
 (def ^:private delta->dir
   (into {} (map (fn [[direction delta]] [delta direction])) dir->delta))
 
@@ -56,7 +49,7 @@
 
 (defn- uppercase-input [notation]
   (schema/throw-violation! :string notation)
-  (str/upper-case notation))
+  (string/upper-case notation))
 
 (defn- tokenize
   "Consume all text, ignoring only whitespace. A gap is invalid syntax."
@@ -67,7 +60,7 @@
         (if (= offset (.start matcher))
           (let [token (.group matcher)]
             (recur (.end matcher)
-                   (if (str/blank? token) tokens (conj tokens token))))
+                   (if (string/blank? token) tokens (conj tokens token))))
           (throw-error! {:error :notation/invalid-syntax
                          :details (assoc context :offset offset :text text)}))
         (if (= offset (count text))
@@ -131,20 +124,19 @@
   [notation]
   (attempt :parse-turns
            #(let [text (uppercase-input notation)]
-              (if (str/blank? text)
+              (if (string/blank? text)
                 []
                 (mapv (fn [index turn] (parse-turn* turn {:turn-index index}))
-                      (range) (str/split text #"/" -1))))))
+                      (range) (string/split text #"/" -1))))))
 
 (defn- format-turn* [turn]
-  (str/join (unparse-turn-tokens (turn->tokens turn))))
+  (string/join (unparse-turn-tokens (turn->tokens turn))))
 
 (defn format-turn
   "Format one representable turn as canonical uppercase notation."
   [turn]
   (attempt :format-turn
            #(do (schema/throw-violation! schema/Turn turn)
-                (require-representable! schema/NotationTurn turn)
                 (format-turn* turn))))
 
 (defn format-turns
@@ -152,8 +144,7 @@
   [turns]
   (attempt :format-turns
            #(do (schema/throw-violation! [:sequential schema/Turn] turns)
-                (require-representable! [:sequential schema/NotationTurn] turns)
-                (str/join "/" (map format-turn* turns)))))
+                (string/join "/" (map format-turn* turns)))))
 
 (def ^:private MetadataTokens
   [:catn
@@ -178,15 +169,15 @@
 
 (defn- parse-game* [notation]
   (let [text (uppercase-input notation)
-        parts (str/split text #"@" -1)]
+        parts (string/split text #"@" -1)]
     (when-not (= 2 (count parts))
       (throw-error! {:error :notation/invalid-syntax
                      :details {:text text :expected "one @ separator"}}))
     (let [[board-text metadata-text] parts
-          columns (str/split board-text #"/" -1)
+          columns (string/split board-text #"/" -1)
           size (count columns)
-          metadata-tokens (if (str/blank? metadata-text)
-                            [] (str/split (str/trim metadata-text) #"\s+"))]
+          metadata-tokens (if (string/blank? metadata-text)
+                            [] (string/split (string/trim metadata-text) #"\s+"))]
       (schema/throw-violation! (into [:enum] schema/game-sizes) size)
       (schema/throw-violation! MetadataTokens metadata-tokens)
       (let [{:keys [turn player red-prison blue-prison blocked]}
@@ -210,12 +201,12 @@
   (attempt :parse-game #(parse-game* notation)))
 
 (defn- format-column [column]
-  (str/join
+  (string/join
    (map (fn [run]
           (case (first run)
             :empty (str (count run))
-            :red (str/join (repeat (count run) "R"))
-            :blue (str/join (repeat (count run) "B"))))
+            :red (string/join (repeat (count run) "R"))
+            :blue (string/join (repeat (count run) "B"))))
         (partition-by identity column))))
 
 (defn format-game
@@ -229,9 +220,8 @@
                                    (update :blocked (fn [coords] (or coords nil)))
                                    (update :next-blocked identity))]
                 (schema/throw-violation! schema/Game normalized)
-                (require-representable! schema/NotationGame normalized)
-                (str (str/join "/" (map format-column (:board normalized)))
-                     " @ " (str/join " "
+                (str (string/join "/" (map format-column (:board normalized)))
+                     " @ " (string/join " "
                                      (cond-> [(str (:turn-number normalized))
                                               ({:red "R" :blue "B"} (:player normalized))
                                               (str (get-in normalized [:prison :red]))
@@ -253,9 +243,7 @@
                 (rest remaining))))))
 
 (comment
-  (parse-turns "C4/D5/B3/F5/C3>NW>NE/A5+F2")
-  (format-turns (parse-turns "C4/D5/B3/F5/C3>NW>NE/A5+F2"))
-  (parse-turns "C3")
+  (parse-turns "C4/D5/B3/F5/C3>NW>NE+C6/A5+F2")
   (format-turn (parse-turn "C10>NW>SW+E5"))
   (let [notation "3R2B3/10/8RR/3BBB1R2/5B3R/1B8/5RB3/10/4B5/10 @ 24 B 3 0 B5"]
     (display/show-game (parse-game notation))

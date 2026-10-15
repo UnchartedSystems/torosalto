@@ -48,8 +48,8 @@
 
 (def Coords
   [:tuple
-   [:int {:min 0}]
-   [:int {:min 0}]])
+   [:int {:min 0 :max 25}]
+   [:int {:min 0 :max 25}]])
 
 (def Place
   [:map
@@ -138,34 +138,6 @@
 (def Game
   (into [:multi {:dispatch :size}]
         (mapv (fn [n] [n (game-schema-for-size n)])
-              game-sizes)))
-
-;; Notation can express A1 through Z26. Closed maps prevent serializers from
-;; silently losing fields; the general Turn and Game schemas remain unchanged.
-(def NotationCoords (bounded-coords 26))
-
-(def NotationTurn
-  [:multi {:dispatch :action}
-   [:place (-> Place
-               (mu/update-in [:details :coords] (constantly NotationCoords))
-               mu/closed-schema)]
-   [:free (-> Free
-              (mu/update-in [:details :coords-1] (constantly NotationCoords))
-              (mu/update-in [:details :coords-2] (constantly NotationCoords))
-              mu/closed-schema)]
-   [:hop (-> Hop
-             (mu/update-in [:details :coords] (constantly NotationCoords))
-             (mu/update-in [:details :place-coords]
-                           (constantly [:or NotationCoords [:enum false nil]]))
-             mu/closed-schema)]])
-
-(def NotationGame
-  (into [:multi {:dispatch :size}]
-        (mapv (fn [n]
-                [n (-> (game-schema-for-size n)
-                       (mu/dissoc :winner)
-                       (mu/optional-keys [:blocked])
-                       mu/closed-schema)])
               game-sizes)))
 
 (def Message

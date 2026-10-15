@@ -7,6 +7,30 @@
             [torosalto.rules :as rules]
             [torosalto.schema :as schema]))
 
+(def NotationTurn
+  [:multi {:dispatch :action}
+   [:place (-> Place
+               (mu/update-in [:details :coords] (constantly NotationCoords))
+               mu/closed-schema)]
+   [:free (-> Free
+              (mu/update-in [:details :coords-1] (constantly NotationCoords))
+              (mu/update-in [:details :coords-2] (constantly NotationCoords))
+              mu/closed-schema)]
+   [:hop (-> Hop
+             (mu/update-in [:details :coords] (constantly NotationCoords))
+             (mu/update-in [:details :place-coords]
+                           (constantly [:or NotationCoords [:enum false nil]]))
+             mu/closed-schema)]])
+
+(def NotationGame
+  (into [:multi {:dispatch :size}]
+        (mapv (fn [n]
+                [n (-> (game-schema-for-size n)
+                       (mu/dissoc :winner)
+                       (mu/optional-keys [:blocked])
+                       mu/closed-schema)])
+              game-sizes)))
+
 (defn- place [coords]
   {:action :place :details {:coords coords}})
 
@@ -167,9 +191,9 @@
   (let [turn (assoc (place [0 0]) :extra true)
         game (assoc (rules/make-game {:size 8}) :winner :red :extra true)]
     (is (m/validate schema/Turn turn))
-    (is (not (m/validate schema/NotationTurn turn)))
+    (is (not (m/validate NotationTurn turn)))
     (is (m/validate schema/Game game))
-    (is (not (m/validate schema/NotationGame game)))))
+    (is (not (m/validate NotationGame game)))))
 
 (deftest malformed-data-is-quiet-and-returns-errors
   (is (= ""
@@ -205,7 +229,7 @@
     (is (= (:game result) (notation/parse-game (notation/format-game (:game result)))))))
 
 (deftest generated-turn-round-trips
-  (let [turns (vec (mg/sample schema/NotationTurn {:seed 426 :size 150}))]
+  (let [turns (vec (mg/sample NotationTurn {:seed 426 :size 150}))]
     (is (= #{:place :free :hop} (set (map :action turns))))
     (doseq [turn turns]
       (let [text (notation/format-turn turn) parsed (notation/parse-turn text)]
@@ -217,7 +241,7 @@
            (notation/parse-turns (notation/format-turns turns))))))
 
 (deftest generated-game-round-trips
-  (let [games (mg/sample schema/NotationGame {:seed 781 :size 80})]
+  (let [games (mg/sample NotationGame {:seed 781 :size 80})]
     (is (= #{8 10} (set (map :size games))))
     (doseq [game games]
       (let [text (notation/format-game game) parsed (notation/parse-game text)]
