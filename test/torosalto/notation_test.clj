@@ -29,8 +29,6 @@
 
 (defn- normalize-game [game]
   (-> game
-      ;; Snapshot notation omits the winner.
-      (dissoc :winner)
       (update :blocked #(or % nil))
       (update :next-blocked identity)))
 
@@ -115,6 +113,46 @@
            (notation/format-game
             (notation/parse-game "4 4/8/8/8/8/8/8/8 @ 1 R 0 0"))))))
 
+(deftest snapshot-result-signifiers
+  (doseq [size [8 10]
+          player [:red :blue]
+          blocked [nil [1 1]]
+          [signifier result] [["@" {}]
+                              ["=" {:winner :draw}]
+                              ["#R" {:winner :red}]
+                              ["#B" {:winner :blue}]
+                              ["!R" {:winner :blue :resigned :red}]
+                              ["!B" {:winner :red :resigned :blue}]]]
+    (let [game (merge (rules/make-game {:size size :turn-number 24 :player player
+                                       :prison {:red 3 :blue 0} :blocked blocked})
+                      result)
+          metadata (str "24 " ({:red "R" :blue "B"} player) " 3 0"
+                        (when blocked " B2"))
+          text (str (empty-board-note size) " " signifier " " metadata)]
+      (testing text
+        (is (= game (notation/parse-game text)))
+        (is (= text (notation/format-game game)))
+        (is (= game (notation/parse-game
+                     (str (empty-board-note size) signifier metadata))))
+        (is (= game (notation/parse-game
+                     (str/lower-case (str (empty-board-note size) "\n" signifier "\t" metadata)))))))))
+
+(deftest malformed-result-signifiers
+  (doseq [signifier ["#" "!" "#G" "!G" "# R" "! B" "@@" "==" "#R!B" "@#R" "!R="]]
+    (let [text (str (empty-board-note 8) " " signifier " 24 B 3 0 B2")
+          data (exception-data #(notation/parse-game text))]
+      (testing text
+        (is (= :notation/invalid-syntax (:error (::notation/error data)))))))
+  (doseq [result [{:resigned :red}
+                  {:winner :red :resigned :red}
+                  {:winner :draw :resigned :blue}
+                  {:winner :red :resigned :green}
+                  {:winner :red :resigned nil}]]
+    (let [data (exception-data
+                #(notation/format-game (merge (rules/make-game) result)))]
+      (testing (str result)
+        (is (= :notation/invalid-result (:error (::notation/error data))))))))
+
 (deftest malformed-snapshots
   (let [board (empty-board-note 8)]
     (doseq [metadata ["" "1 R 0" "1 Q 0 0" "0 R 0 0" "-1 R 0 0"
@@ -128,6 +166,7 @@
         (is (thrown? ExceptionInfo
                      (notation/parse-game (str board " @ " metadata))))))
     (doseq [text [(str board " 1 R 0 0") (str board " @ 1 R 0 0 @")
+                  (str board " #RR 1 R 0 0")
                   "1 @ 1 R 0 0" "8/8/8/8/8/8/8/8/ @ 1 R 0 0"
                   "8//8/8/8/8/8/8 @ 1 R 0 0"
                   "8x/8/8/8/8/8/8/8 @ 1 R 0 0"
@@ -188,8 +227,7 @@
     (is (= turn (notation/parse-turn (notation/format-turn input))))
     (is (= [turn] (notation/parse-turns (notation/format-turns [input])))))
   (let [game (rules/make-game {:size 8})]
-    (doseq [input [(assoc game :winner :red) (assoc game :winner :blue)
-                   (assoc game :winner :draw) (assoc game :extra true)
+    (doseq [input [(assoc game :extra true)
                    (assoc-in game [:prison :extra] 1)]]
       (is (m/validate schema/Game input))
       (is (= (notation/format-game game) (notation/format-game input)))

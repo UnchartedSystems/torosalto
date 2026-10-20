@@ -34,8 +34,24 @@ stones, followed by metadata:
 
 ```text
 1R6/8/8/8/8/8/8/5B2 @ 7 B 3 4 B2
-board @ turn-number player red-prisoners blue-prisoners [blocked-square]
+board signifier turn-number player red-prisoners blue-prisoners [blocked-square]
 ```
+
+The signifier records the game's status:
+
+| Signifier | Status |
+| --- | --- |
+| `@` | Active |
+| `=` | Draw |
+| `#R`, `#B` | Red wins, Blue wins |
+| `!R`, `!B` | Red resigns, Blue resigns |
+
+The turn player, turn number, prisoners, and blocked square are preserved for
+every status. Wins and draws set `:winner` to `:red`, `:blue`, or `:draw`.
+Resignations also set `:resigned` to the resigning player and `:winner` to the
+opponent, so `!R` round-trips distinctly from `#B`. This is notation support;
+the game schema and rules do not yet define resignation behavior. Formatting
+requires a resignation's winner to be the opponent of the resigning player.
 
 For compatibility, slash-separated board segments are **columns**, starting
 with A; cells in each column start at square 1 and continue upward. The example
@@ -56,11 +72,10 @@ the metadata. Numbers and squares must remain intact when adding whitespace.
 ;; => "A1/B2"
 ```
 
-All six converters return `{:error keyword :details ... :operation keyword}`
-on invalid input, without printing. Errors distinguish invalid syntax,
-schema violations, and data the notation cannot represent. Formatting rejects
-extra fields and snapshots containing a winner or non-nil `next-blocked`, so
-state is never silently discarded. Snapshot version is always 0. Missing,
+All six converters throw `ExceptionInfo` on invalid input, without printing.
+Error data is under `:torosalto.notation/error` or `:torosalto.schema/error`.
+Formatting preserves snapshot results and omits other extra fields; snapshots
+with non-nil `next-blocked` are rejected. Snapshot version is always 0. Missing,
 nil, or false optional coordinates normalize to nil; missing `next-blocked`
 normalizes to nil. Round trips preserve data with these normalizations.
 
