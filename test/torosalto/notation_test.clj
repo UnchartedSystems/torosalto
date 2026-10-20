@@ -5,7 +5,15 @@
             [malli.generator :as mg]
             [torosalto.notation :as notation]
             [torosalto.rules :as rules]
-            [torosalto.schema :as schema]))
+            [torosalto.schema :as schema])
+  (:import [clojure.lang ExceptionInfo]))
+
+(defn- exception-data [f]
+  (try
+    (f)
+    nil
+    (catch ExceptionInfo e
+      (ex-data e))))
 
 (defn- place [coords]
   {:action :place :details {:coords coords}})
@@ -57,23 +65,25 @@
   (is (= [] (notation/parse-turns " \n\t")))
   (is (= "" (notation/format-turns [])))
   (is (= "" (notation/format-turns '())))
-  (is (:error (notation/parse-turn "")))
-  (is (:error (notation/parse-turn "A1/B2"))))
+  (is (thrown? ExceptionInfo (notation/parse-turn "")))
+  (is (thrown? ExceptionInfo (notation/parse-turn "A1/B2"))))
 
 (deftest malformed-turns
   (doseq [text ["C10/" "C10//" "/C10" "C10//D5" "C10/ /D5"
                 "C10>" "C10>>NW" "C10>NW>" "C10+" "C10++E5"
                 "C10+E5+F6" "C10+E5>NW" "C10>NW+E5+F6"
                 "C10>1793" "C10>NORTH" "A0" "A01" "A27" "AA1"
-                "C 10" "A1!" "A1@" "A1#" "A1B2" "A1\u0000"
+                "C 10" "!A1" "A1!>NW" "A1!" "A1@" "A1#" "A1B2" "A1\u0000"
                 "A99999999999999999999999999999999999"]]
     (testing text
-      (let [result (notation/parse-turns text)]
-        (is (= :notation/invalid-syntax (:error result)))
-        (is (contains? (:details result) :turn-index)))))
-  (let [result (notation/parse-turns "A1/B2!")]
-    (is (= 1 (get-in result [:details :turn-index])))
-    (is (= 2 (get-in result [:details :offset])))))
+      (doseq [parse [notation/parse-turn notation/parse-turns]]
+        (let [error (::notation/error (exception-data #(parse text)))]
+          (is (= :notation/invalid-syntax (:error error)))
+          (is (string? (get-in error [:details :text])))))))
+  (let [error (::notation/error
+               (exception-data #(notation/parse-turns "A1/B2!")))]
+    (is (= :notation/invalid-syntax (:error error)))
+    (is (= "B2!" (get-in error [:details :text])))))
 
 (deftest optional-turn-coordinates
   (let [turn (hop [2 9] [[-1 1]] nil)]
@@ -115,7 +125,8 @@
                       "1 R 0 10000000001" "9999999999999999999999999999 R 0 0"
                       "1 R 9999999999999999999999999999 0"]]
       (testing metadata
-        (is (:error (notation/parse-game (str board " @ " metadata))))))
+        (is (thrown? ExceptionInfo
+                     (notation/parse-game (str board " @ " metadata))))))
     (doseq [text [(str board " 1 R 0 0") (str board " @ 1 R 0 0 @")
                   "1 @ 1 R 0 0" "8/8/8/8/8/8/8/8/ @ 1 R 0 0"
                   "8//8/8/8/8/8/8 @ 1 R 0 0"
@@ -130,11 +141,12 @@
                   "8#/8/8/8/8/8/8/8 @ 1 R 0 0"
                   "8\u0000/8/8/8/8/8/8/8 @ 1 R 0 0"]]
       (testing text
-        (is (:error (notation/parse-game text)))))
-    (is (= :notation/invalid-syntax
-           (:error (notation/parse-game "8x/8/8/8/8/8/8/8 @ 1 R 0 0"))))
-    (is (= 0 (get-in (notation/parse-game "8x/8/8/8/8/8/8/8 @ 1 R 0 0")
-                     [:details :column-index])))))
+        (is (thrown? ExceptionInfo (notation/parse-game text)))))
+    (let [error (::notation/error
+                 (exception-data
+                  #(notation/parse-game "8x/8/8/8/8/8/8/8 @ 1 R 0 0")))]
+      (is (= :notation/invalid-syntax (:error error)))
+      (is (= "8X" (get-in error [:details :text]))))))
 
 (deftest optional-game-fields-and-limits
   (let [canonical (rules/make-game {:size 8})]
@@ -152,14 +164,19 @@
   (let [turn (place [0 0]) game (rules/make-game {:size 8})]
     (doseq [input [(place [26 0]) (place [0 26])
                    (hop [0 0] [[0 1]] [26 0])]]
-      (is (= :schema/violation (:error (notation/format-turn input)))))
+      (is (= :schema/violation
+             (get-in (exception-data #(notation/format-turn input))
+                     [::schema/error :error]))))
     (doseq [input [(assoc game :next-blocked [0 0]) (assoc game :version 1)
                    (assoc game :blocked [8 0]) (assoc game :turn-number 0)
                    (assoc-in game [:board 0 0] :green)
                    (assoc-in game [:prison :red] -1)]]
-      (is (= :schema/violation (:error (notation/format-game input)))))
+      (is (= :schema/violation
+             (get-in (exception-data #(notation/format-game input))
+                     [::schema/error :error]))))
     (is (= :schema/violation
-           (:error (notation/format-turns [turn (place [26 0])]))))))
+           (get-in (exception-data #(notation/format-turns [turn (place [26 0])]))
+                   [::schema/error :error])))))
 
 (deftest formatting-omits-unencoded-fields
   (doseq [turn [(place [0 0])
@@ -178,23 +195,23 @@
       (is (= (notation/format-game game) (notation/format-game input)))
       (is (= game (notation/parse-game (notation/format-game input)))))))
 
-(deftest malformed-data-is-quiet-and-returns-errors
+(deftest malformed-data-is-quiet-and-throws
   (is (= ""
          (with-out-str
            (doseq [parse [notation/parse-turn notation/parse-turns notation/parse-game]
                    input [nil false 12 {} [] :red]]
-             (let [result (parse input)]
-               (is (= :schema/violation (:error result)))
-               (is (contains? result :details))
-               (is (contains? result :operation))))
+             (let [data (exception-data #(parse input))
+                   error (::schema/error data)]
+               (is (= :schema/violation (:error error)))
+               (is (contains? error :details))))
            (doseq [format [notation/format-turn notation/format-turns notation/format-game]
                    input [nil false 12 {} :red "A1"]]
-             (is (:error (format input))))
+             (is (thrown? ExceptionInfo (format input))))
            (doseq [input [{:action :hop :details {:coords [0 0] :directions []}}
                          {:action :hop :details {:coords [0 0] :directions [[2 0]]}}
                          (place [-1 0]) (place [0]) (place ["A" 1])
                          {:action :unknown :details {}}]]
-             (is (:error (notation/format-turn input))))))))
+             (is (thrown? ExceptionInfo (notation/format-turn input))))))))
 
 (deftest conversion-does-not-enforce-game-legality
   (let [turn (hop [0 0] [[0 1] [1 1]] [1 1])
@@ -234,7 +251,15 @@
         (is (= text (notation/format-game parsed)))))))
 
 (deftest arbitrary-text-is-validated
-  (doseq [text (mg/sample [:string {:max 100}] {:seed 932 :size 120})]
-    (let [turns (notation/parse-turns text) game (notation/parse-game text)]
-      (is (or (:error turns) (m/validate [:vector schema/Turn] turns)))
-      (is (or (:error game) (m/validate schema/Game game))))))
+  (doseq [text (mg/sample [:string {:max 100}] {:seed 932 :size 120})
+          [parse result-schema] [[notation/parse-turn schema/Turn]
+                                 [notation/parse-turns [:vector schema/Turn]]
+                                 [notation/parse-game schema/Game]]]
+    (try
+      (let [parsed (parse text)]
+        (is (m/validate result-schema parsed)))
+      (catch ExceptionInfo e
+        (let [data (ex-data e)
+              error (or (::notation/error data) (::schema/error data))]
+          (is (contains? #{:notation/invalid-syntax :schema/violation} (:error error)))
+          (is (contains? error :details)))))))

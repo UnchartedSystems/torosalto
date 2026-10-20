@@ -1,22 +1,14 @@
 (ns torosalto.notation
+  "Parse and format turns and board snapshots.
+  Invalid input throws ExceptionInfo with ::error or ::schema/error in ex-data."
   (:require [torosalto.rules :as rules]
             [torosalto.display :as display]
             [torosalto.schema :as schema]
             [malli.core :as m]
-            [malli.error :as me]
             [clojure.string :as string]))
 
 (defn- throw-error! [error]
-  (throw (ex-info (str "Invalid Notation: " (:error error)) {::error error})))
-
-(defn- attempt [operation f]
-  (try
-    (f)
-    (catch clojure.lang.ExceptionInfo e
-      (if-let [error (or (::error (ex-data e))
-                         (::schema/error (ex-data e)))]
-        (assoc error :operation operation)
-        (throw e)))))
+  (throw (ex-info (str "Invalid Notation. \n" error) {::error error})))
 
 (def letter->x
   (zipmap (map str "ABCDEFGHIJKLMNOPQRSTUVWXYZ") (range 26)))
@@ -60,12 +52,12 @@
 
 (defn- tokenize [pattern text]
   (let [tokens (re-seq pattern text)]
-    (when-not (= text (str/join tokens))
+    (when-not (= text (string/join tokens))
       (throw-error!
        {:error :notation/invalid-syntax
         :details {:pattern pattern
                   :text text}}))
-    (vec (remove str/blank? tokens))))
+    (vec (remove string/blank? tokens))))
 
 (defn- tokens->turn [{:keys [key value]}]
   (let [{:keys [square first second start hops place]} (:values value)]
@@ -95,53 +87,42 @@
                              (m/tags {:separator "+"
                                       :square (coords->square place-coords)}))})))))
 
-(defn- parse-turn* [text]
-  (let [tokens (tokenize #"[A-Z][0-9]+|[A-Z]+|[0-9]+|[>+/]|\s+" text)
+(defn parse-turn [notation]
+  (let [text   (uppercase-input notation)
+        tokens (tokenize #"[A-Z][0-9]+|[A-Z]+|[0-9]+|[>+/]|\s+" text)
         parsed (parse-turn-tokens tokens)]
-    
     (when (= ::m/invalid parsed)
       (throw-error!
        {:error :notation/invalid-syntax
         :details {:text text
                   :tokens tokens}}))
-    
     (let [turn (tokens->turn parsed)]
       (schema/throw-violation! schema/Turn turn)
       turn)))
 
-(defn parse-turn
-  "Parse exactly one turn, returning a turn map or an error map."
-  [notation]
-  (attempt :parse-turn #(parse-turn* (uppercase-input notation))))
-
-(defn parse-turns
-  "Parse slash-separated turns. Blank input represents an empty vector."
-  [notation]
-  (attempt :parse-turns
-           #(let [text (uppercase-input notation)]
-              (if (string/blank? text)
-                []
-                (mapv (fn [index turn] (parse-turn* turn {:turn-index index}))
-                      (range) (string/split text #"/" -1))))))
+(defn parse-turns [notation]
+  (if (string/blank? notation)
+    []
+    (mapv parse-turn (string/split notation #"/" -1))))
 
 (defn- format-turn* [turn]
   (string/join (unparse-turn-tokens (turn->tokens turn))))
 
 (defn format-turn
-  "Format one representable turn as canonical uppercase notation."
+  "Format one turn as canonical uppercase notation.
+  Throws ExceptionInfo on invalid input. Extra fields are omitted."
   [turn]
-  (attempt :format-turn
-           #(do (schema/throw-violation! schema/Turn turn)
-                (format-turn* turn))))
+  (schema/throw-violation! schema/Turn turn)
+  (format-turn* turn))
 
 (defn format-turns
-  "Format a sequence of turns; an empty sequence becomes an empty string."
+  "Format a sequence of turns; an empty sequence becomes an empty string.
+  Throws ExceptionInfo on invalid input. Extra fields are omitted."
   [turns]
-  (attempt :format-turns
-           #(do (schema/throw-violation! [:sequential schema/Turn] turns)
-                (string/join "/" (map format-turn* turns)))))
+  (schema/throw-violation! [:sequential schema/Turn] turns)
+  (string/join "/" (map format-turn* turns)))
 
-(def ^:private MetadataTokens
+(def MetadataTokens
   [:catn
    [:turn #"^[0-9]+$"]
    [:player [:enum "R" "B"]]
@@ -149,9 +130,9 @@
    [:blue-prison #"^[0-9]+$"]
    [:blocked [:? Square]]])
 
-(def ^:private parse-metadata-tokens (m/parser MetadataTokens))
+(def parse-metadata-tokens (m/parser MetadataTokens))
 
-(defn- parse-column [size index text]
+(defn- parse-column [size text]
   (let [tokens (tokenize #"[0-9]+|[RB]|\s+" text)
         runs (mapv #(case % "R" :red "B" :blue (parse-long %)) tokens)
         run-schema [:vector {:min 1}
@@ -162,7 +143,11 @@
       (schema/throw-violation! [:= size] width))
     (vec (mapcat #(if (int? %) (repeat % :empty) [%]) runs))))
 
-(defn- parse-game* [notation]
+(defn parse-game
+  "Parse a board snapshot. Segments are columns A onward, each from rank 1 up.
+  Metadata is: @ turn player red-prison blue-prison [blocked-square].
+  Throws ExceptionInfo on invalid input."
+  [notation]
   (let [text (uppercase-input notation)
         parts (string/split text #"@" -1)]
     (when-not (= 2 (count parts))
@@ -184,16 +169,9 @@
                   :blocked (when blocked (square->coords blocked))
                   :next-blocked nil
                   :version 0
-                  :board (mapv (fn [index column] (parse-column size index column))
-                               (range) columns)}]
+                  :board (mapv #(parse-column size %) columns)}]
         (schema/throw-violation! schema/Game game)
         game))))
-
-(defn parse-game
-  "Parse a board snapshot. Segments are columns A onward, each from rank 1 up.
-  Metadata is: @ turn player red-prison blue-prison [blocked-square]."
-  [notation]
-  (attempt :parse-game #(parse-game* notation)))
 
 (defn- format-column [column]
   (string/join
@@ -205,24 +183,21 @@
         (partition-by identity column))))
 
 (defn format-game
-  "Format a representable board snapshot. Winners and extra fields are rejected.
-  Missing blocked/next-blocked and false blocked normalize to nil."
+  "Format a board snapshot. Winners and extra fields are omitted.
+  Missing or false blocked coordinates normalize to nil.
+  Throws ExceptionInfo on invalid input."
   [game]
-  (attempt :format-game
-           #(do
-              (schema/throw-violation! :map game)
-              (let [normalized (-> game
-                                   (update :blocked (fn [coords] (or coords nil)))
-                                   (update :next-blocked identity))]
-                (schema/throw-violation! schema/Game normalized)
-                (str (string/join "/" (map format-column (:board normalized)))
-                     " @ " (string/join " "
-                                     (cond-> [(str (:turn-number normalized))
-                                              ({:red "R" :blue "B"} (:player normalized))
-                                              (str (get-in normalized [:prison :red]))
-                                              (str (get-in normalized [:prison :blue]))]
-                                       (:blocked normalized)
-                                       (conj (coords->square (:blocked normalized))))))))))
+  (schema/throw-violation! :map game)
+  (let [{:keys [board turn-number player prison blocked] :as normalized}
+        (update game :blocked #(or % nil))]
+    (schema/throw-violation! schema/Game normalized)
+    (str (string/join "/" (map format-column board))
+         " @ " (string/join " "
+                         (cond-> [turn-number
+                                  ({:red "R" :blue "B"} player)
+                                  (:red prison)
+                                  (:blue prison)]
+                           blocked (conj (coords->square blocked)))))))
 
 (defn simulate-game
   ([game turns]

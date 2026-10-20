@@ -7,9 +7,10 @@
 (defn throw-violation! [schema instance]
   (if-let [violation (m/explain schema instance)]
     (throw
-     (ex-info (str "Schema Violation. ")
-              {::error {:error :schema/violation
-                        :details (me/humanize violation)}}))))
+     (let [explanation (me/humanize violation)]
+       (ex-info (str "Schema Violation. \n" explanation)
+                {::error {:error :schema/violation
+                          :details explanation}})))))
 
 ;; Safe Max Int
 (def safe-max 10000000000)
