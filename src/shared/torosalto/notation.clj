@@ -29,13 +29,24 @@
    "W"  [-1  0]             "E"  [1 0]
    "SW" [-1 -1] "S" [0 -1] "SE" [1 -1]})
 
-(def ^:private delta->dir
+(def delta->dir
   (into {} (map (fn [[direction delta]] [delta direction])) dir->delta))
 
-(def ^:private Square #"^[A-Z](?:[1-9]|1[0-9]|2[0-6])$")
-(def ^:private Direction (into [:enum] (keys dir->delta)))
+(def Square #"^[A-Z](?:[1-9]|1[0-9]|2[0-6])$")
+(def Direction (into [:enum] (keys dir->delta)))
 
-(def ^:private TurnTokens
+(defn- square->coords [square]
+  [(get letter->x (subs square 0 1))
+   (get number->y (subs square 1))])
+
+(defn- coords->square [[x y]]
+  (str (char (+ (int \A) x)) (inc y)))
+
+(defn- uppercase-input [notation]
+  (schema/throw-violation! :string notation)
+  (string/upper-case notation))
+
+(def TurnTokens
   [:altn
    [:place [:catn [:square Square]]]
    [:free [:catn [:first Square] [:separator [:= "+"]] [:second Square]]]
@@ -44,36 +55,17 @@
           [:hops [:+ [:catn [:separator [:= ">"]] [:direction Direction]]]]
           [:place [:? [:catn [:separator [:= "+"]] [:square Square]]]]]]])
 
-(def ^:private parse-turn-tokens (m/parser TurnTokens))
-(def ^:private unparse-turn-tokens (m/unparser TurnTokens))
+(def parse-turn-tokens (m/parser TurnTokens))
+(def unparse-turn-tokens (m/unparser TurnTokens))
 
-(defn- uppercase-input [notation]
-  (schema/throw-violation! :string notation)
-  (string/upper-case notation))
-
-(defn- tokenize
-  "Consume all text, ignoring only whitespace. A gap is invalid syntax."
-  [pattern text context]
-  (let [matcher (re-matcher pattern text)]
-    (loop [offset 0 tokens []]
-      (if (.find matcher)
-        (if (= offset (.start matcher))
-          (let [token (.group matcher)]
-            (recur (.end matcher)
-                   (if (string/blank? token) tokens (conj tokens token))))
-          (throw-error! {:error :notation/invalid-syntax
-                         :details (assoc context :offset offset :text text)}))
-        (if (= offset (count text))
-          tokens
-          (throw-error! {:error :notation/invalid-syntax
-                         :details (assoc context :offset offset :text text)}))))))
-
-(defn- square->coords [square]
-  [(get letter->x (subs square 0 1))
-   (get number->y (subs square 1))])
-
-(defn- coords->square [[x y]]
-  (str (char (+ (int \A) x)) (inc y)))
+(defn- tokenize [pattern text]
+  (let [tokens (re-seq pattern text)]
+    (when-not (= text (str/join tokens))
+      (throw-error!
+       {:error :notation/invalid-syntax
+        :details {:pattern pattern
+                  :text text}}))
+    (vec (remove str/blank? tokens))))
 
 (defn- tokens->turn [{:keys [key value]}]
   (let [{:keys [square first second start hops place]} (:values value)]
@@ -103,13 +95,16 @@
                              (m/tags {:separator "+"
                                       :square (coords->square place-coords)}))})))))
 
-(defn- parse-turn* [text context]
-  (let [tokens (tokenize #"[A-Z][0-9]+|[A-Z]+|[0-9]+|[>+/]|\s+" text context)
+(defn- parse-turn* [text]
+  (let [tokens (tokenize #"[A-Z][0-9]+|[A-Z]+|[0-9]+|[>+/]|\s+" text)
         parsed (parse-turn-tokens tokens)]
+    
     (when (= ::m/invalid parsed)
-      (throw-error! {:error :notation/invalid-syntax
-                     :details (assoc context :text text :tokens tokens
-                                     :violations (me/humanize (m/explain TurnTokens tokens)))}))
+      (throw-error!
+       {:error :notation/invalid-syntax
+        :details {:text text
+                  :tokens tokens}}))
+    
     (let [turn (tokens->turn parsed)]
       (schema/throw-violation! schema/Turn turn)
       turn)))
@@ -117,7 +112,7 @@
 (defn parse-turn
   "Parse exactly one turn, returning a turn map or an error map."
   [notation]
-  (attempt :parse-turn #(parse-turn* (uppercase-input notation) {})))
+  (attempt :parse-turn #(parse-turn* (uppercase-input notation))))
 
 (defn parse-turns
   "Parse slash-separated turns. Blank input represents an empty vector."
@@ -157,7 +152,7 @@
 (def ^:private parse-metadata-tokens (m/parser MetadataTokens))
 
 (defn- parse-column [size index text]
-  (let [tokens (tokenize #"[0-9]+|[RB]|\s+" text {:column-index index})
+  (let [tokens (tokenize #"[0-9]+|[RB]|\s+" text)
         runs (mapv #(case % "R" :red "B" :blue (parse-long %)) tokens)
         run-schema [:vector {:min 1}
                     [:or schema/Stone [:int {:min 1 :max size}]]]]

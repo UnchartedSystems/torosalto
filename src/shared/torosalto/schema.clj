@@ -56,12 +56,6 @@
    [:action [:= :place]]
    [:details [:map [:coords Coords]]]])
 
-(comment
-  (m/validate
-   Place
-   {:action :place
-    :details {:coords [0 7]}}))
-
 (def Free
   [:map
    [:action [:= :free]]
@@ -69,13 +63,6 @@
     [:map
      [:coords-1 Coords]
      [:coords-2 Coords]]]])
-
-(comment
-  (m/validate
-   Free
-   {:action :free
-    :details {:coords-1 [7 1]
-              :coords-2 [1 6]}}))
 
 ;; Not included in Hop, used for legality error checking.
 (def Directions
@@ -98,15 +85,6 @@
    [:place Place]
    [:free Free]
    [:hop Hop]])
-
-(comment
-  (m/validate
-   Hop
-   {:action :hop
-    :details {:coords [3 3]
-              :place-coords [9 0]
-              :directions [[-1 1] [0 -1]]}}))
-
 
 (defn board-schema [n]
   [:vector {:min n :max n}
@@ -146,3 +124,4 @@
    [:game {:optional true} :map]
    [:persistent? {:optional true} :boolean]
    [:id {:optional true} :int]])
+

@@ -7,30 +7,6 @@
             [torosalto.rules :as rules]
             [torosalto.schema :as schema]))
 
-(def NotationTurn
-  [:multi {:dispatch :action}
-   [:place (-> Place
-               (mu/update-in [:details :coords] (constantly NotationCoords))
-               mu/closed-schema)]
-   [:free (-> Free
-              (mu/update-in [:details :coords-1] (constantly NotationCoords))
-              (mu/update-in [:details :coords-2] (constantly NotationCoords))
-              mu/closed-schema)]
-   [:hop (-> Hop
-             (mu/update-in [:details :coords] (constantly NotationCoords))
-             (mu/update-in [:details :place-coords]
-                           (constantly [:or NotationCoords [:enum false nil]]))
-             mu/closed-schema)]])
-
-(def NotationGame
-  (into [:multi {:dispatch :size}]
-        (mapv (fn [n]
-                [n (-> (game-schema-for-size n)
-                       (mu/dissoc :winner)
-                       (mu/optional-keys [:blocked])
-                       mu/closed-schema)])
-              game-sizes)))
-
 (defn- place [coords]
   {:action :place :details {:coords coords}})
 
@@ -45,6 +21,8 @@
 
 (defn- normalize-game [game]
   (-> game
+      ;; Snapshot notation omits the winner.
+      (dissoc :winner)
       (update :blocked #(or % nil))
       (update :next-blocked identity)))
 
@@ -170,30 +148,35 @@
                                 :prison {:red schema/safe-max :blue schema/safe-max}})]
       (is (= game (notation/parse-game (notation/format-game game)))))))
 
-(deftest reject-unrepresentable-data
+(deftest reject-invalid-data
   (let [turn (place [0 0]) game (rules/make-game {:size 8})]
     (doseq [input [(place [26 0]) (place [0 26])
-                   (assoc turn :extra true) (assoc-in turn [:details :extra] true)
                    (hop [0 0] [[0 1]] [26 0])]]
-      (is (= :notation/unrepresentable (:error (notation/format-turn input)))))
-    (doseq [input [(assoc game :winner :red) (assoc game :winner :blue)
-                   (assoc game :winner :draw) (assoc game :extra true)
-                   (assoc-in game [:prison :extra] 1)]]
-      (is (= :notation/unrepresentable (:error (notation/format-game input)))))
+      (is (= :schema/violation (:error (notation/format-turn input)))))
     (doseq [input [(assoc game :next-blocked [0 0]) (assoc game :version 1)
                    (assoc game :blocked [8 0]) (assoc game :turn-number 0)
                    (assoc-in game [:board 0 0] :green)
                    (assoc-in game [:prison :red] -1)]]
       (is (= :schema/violation (:error (notation/format-game input)))))
-    (is (:error (notation/format-turns [turn (place [26 0])])))))
+    (is (= :schema/violation
+           (:error (notation/format-turns [turn (place [26 0])]))))))
 
-(deftest general-schemas-remain-open
-  (let [turn (assoc (place [0 0]) :extra true)
-        game (assoc (rules/make-game {:size 8}) :winner :red :extra true)]
-    (is (m/validate schema/Turn turn))
-    (is (not (m/validate NotationTurn turn)))
-    (is (m/validate schema/Game game))
-    (is (not (m/validate NotationGame game)))))
+(deftest formatting-omits-unencoded-fields
+  (doseq [turn [(place [0 0])
+                {:action :free :details {:coords-1 [0 0] :coords-2 [2 2]}}
+                (hop [0 0] [[0 1]] nil)]
+          input [(assoc turn :extra true) (assoc-in turn [:details :extra] true)]]
+    (is (m/validate schema/Turn input))
+    (is (= (notation/format-turn turn) (notation/format-turn input)))
+    (is (= turn (notation/parse-turn (notation/format-turn input))))
+    (is (= [turn] (notation/parse-turns (notation/format-turns [input])))))
+  (let [game (rules/make-game {:size 8})]
+    (doseq [input [(assoc game :winner :red) (assoc game :winner :blue)
+                   (assoc game :winner :draw) (assoc game :extra true)
+                   (assoc-in game [:prison :extra] 1)]]
+      (is (m/validate schema/Game input))
+      (is (= (notation/format-game game) (notation/format-game input)))
+      (is (= game (notation/parse-game (notation/format-game input)))))))
 
 (deftest malformed-data-is-quiet-and-returns-errors
   (is (= ""
@@ -229,7 +212,7 @@
     (is (= (:game result) (notation/parse-game (notation/format-game (:game result)))))))
 
 (deftest generated-turn-round-trips
-  (let [turns (vec (mg/sample NotationTurn {:seed 426 :size 150}))]
+  (let [turns (vec (mg/sample schema/Turn {:seed 426 :size 150}))]
     (is (= #{:place :free :hop} (set (map :action turns))))
     (doseq [turn turns]
       (let [text (notation/format-turn turn) parsed (notation/parse-turn text)]
@@ -241,7 +224,7 @@
            (notation/parse-turns (notation/format-turns turns))))))
 
 (deftest generated-game-round-trips
-  (let [games (mg/sample NotationGame {:seed 781 :size 80})]
+  (let [games (mg/sample schema/Game {:seed 781 :size 80})]
     (is (= #{8 10} (set (map :size games))))
     (doseq [game games]
       (let [text (notation/format-game game) parsed (notation/parse-game text)]
