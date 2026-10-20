@@ -81,11 +81,16 @@
      [:directions
       [:vector {:min 1} Adjacencies]]]]])
 
+(def Resign
+  [:map
+   [:action [:= :resign]]])
+
 (def Turn
   [:multi {:dispatch :action}
    [:place Place]
    [:free Free]
-   [:hop Hop]])
+   [:hop Hop]
+   [:resign Resign]])
 
 (defn board-schema [n]
   [:vector {:min n :max n}
@@ -96,6 +101,12 @@
    [:int {:min 0 :max (dec n)}]
    [:int {:min 0 :max (dec n)}]])
 
+(def Result
+  [:or
+   [:= :draw]
+   [:map {:closed true} [:winner Stone]]
+   [:map {:closed true} [:resigned Stone]]])
+
 (defn game-schema-for-size [n]
   (let [coords (bounded-coords n)]
     [:map
@@ -104,7 +115,7 @@
      [:blocked [:or coords [:enum false nil]]]
      [:next-blocked {:optional true} :nil]
      [:version [:= 0]]
-     [:winner {:optional true} [:enum :red :blue :draw]]
+     [:result {:optional true} Result]
      [:player Stone]
      [:prison
       [:map

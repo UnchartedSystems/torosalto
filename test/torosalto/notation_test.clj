@@ -37,7 +37,8 @@
 
 (deftest turn-forms
   (doseq [[text expected]
-          [["C10" (place [2 9])]
+          [["!" {:action :resign}]
+           ["C10" (place [2 9])]
            ["C10+E5" {:action :free :details {:coords-1 [2 9] :coords-2 [4 4]}}]
            ["C10>NW" (hop [2 9] [[-1 1]] nil)]
            ["C10>NW>SW+E5" (hop [2 9] [[-1 1] [-1 -1]] [4 4])]
@@ -66,12 +67,28 @@
   (is (thrown? ExceptionInfo (notation/parse-turn "")))
   (is (thrown? ExceptionInfo (notation/parse-turn "A1/B2"))))
 
+(deftest resignation-turns
+  (is (= {:action :resign} (notation/parse-turn " \n!\t ")))
+  (let [text "C4/!/D5"
+        turns [(place [2 3]) {:action :resign} (place [3 4])]]
+    (is (= turns (notation/parse-turns text)))
+    (is (= text (notation/format-turns turns)))
+    (is (= :turn/game-already-ended
+           (:error (binding [*out* (java.io.StringWriter.)]
+                     (notation/simulate-game rules/new-game turns))))))
+  (let [game (:game (notation/simulate-game rules/new-game
+                                           (notation/parse-turns "C4/!")))]
+    (is (= {:resigned :blue} (:result game)))
+    (is (= :blue (:player game)))
+    (is (= 2 (:turn-number game)))))
+
 (deftest malformed-turns
   (doseq [text ["C10/" "C10//" "/C10" "C10//D5" "C10/ /D5"
                 "C10>" "C10>>NW" "C10>NW>" "C10+" "C10++E5"
                 "C10+E5+F6" "C10+E5>NW" "C10>NW+E5+F6"
                 "C10>1793" "C10>NORTH" "A0" "A01" "A27" "AA1"
                 "C 10" "!A1" "A1!>NW" "A1!" "A1@" "A1#" "A1B2" "A1\u0000"
+                "!!" "!R" "!B" "!+A1" "A1+!" "!>NW" "A1>NW!" "!/"
                 "A99999999999999999999999999999999999"]]
     (testing text
       (doseq [parse [notation/parse-turn notation/parse-turns]]
@@ -268,7 +285,7 @@
 
 (deftest generated-turn-round-trips
   (let [turns (vec (mg/sample schema/Turn {:seed 426 :size 150}))]
-    (is (= #{:place :free :hop} (set (map :action turns))))
+    (is (= #{:place :free :hop :resign} (set (map :action turns))))
     (doseq [turn turns]
       (let [text (notation/format-turn turn) parsed (notation/parse-turn text)]
         (is (string? text))

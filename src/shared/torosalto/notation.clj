@@ -19,6 +19,8 @@
   ;; A Hop Action: ".../C3>NW>NE/...", optionally ".../C3>NW>NE+C6/..."
   ;; Described by a starting stone coordinate, followed by compass directions representing hop directions
   ;; Optionally followed by a placement coordinate represented by a "+" token.
+  ;; A Resign Action: ".../!"
+  ;; Described by a standalone "!"; the game rules determine who resigns and reject later actions.
   )
 
 (comment ;; Board Notation
@@ -67,9 +69,9 @@
 (defn- coords->square [[x y]]
   (str (char (+ (int \A) x)) (inc y)))
 
-(defn- uppercase-input [notation]
-  (schema/throw-violation! :string notation)
-  (string/upper-case notation))
+(def ^:private ascii-uppercase-map
+  (zipmap "abcdefghijklmnopqrstuvwxyz"
+          "ABCDEFGHIJKLMNOPQRSTUVWXYZ"))
 
 (def TurnTokens
   [:altn
@@ -78,7 +80,8 @@
    [:hop [:catn
           [:start Square]
           [:hops [:+ [:catn [:separator [:= ">"]] [:direction Direction]]]]
-          [:place [:? [:catn [:separator [:= "+"]] [:square Square]]]]]]])
+          [:place [:? [:catn [:separator [:= "+"]] [:square Square]]]]]]
+   [:resign [:catn [:token [:= "!"]]]]])
 
 (def parse-turn-tokens (m/parser TurnTokens))
 (def unparse-turn-tokens (m/unparser TurnTokens))
@@ -94,21 +97,23 @@
 
 (defn- tokens->turn [{:keys [key value]}]
   (let [{:keys [square first second start hops place]} (:values value)]
-    {:action key
-     :details
-     (case key
-       :place {:coords (square->coords square)}
-       :free {:coords-1 (square->coords first)
-              :coords-2 (square->coords second)}
-       :hop {:coords (square->coords start)
-             :directions (mapv #(get dir->delta (:direction (:values %))) hops)
-             :place-coords (when place (square->coords (:square (:values place))))})}))
+    (cond-> {:action key}
+      (not= :resign key)
+      (assoc :details
+             (case key
+               :place {:coords (square->coords square)}
+               :free {:coords-1 (square->coords first)
+                      :coords-2 (square->coords second)}
+               :hop {:coords (square->coords start)
+                     :directions (mapv #(get dir->delta (:direction (:values %))) hops)
+                     :place-coords (when place (square->coords (:square (:values place))))})))))
 
 (defn- turn->tokens [{:keys [action details]}]
   (let [{:keys [coords coords-1 coords-2 directions place-coords]} details]
     (m/tag action
            (m/tags
             (case action
+              :resign {:token "!"}
               :place {:square (coords->square coords)}
               :free {:first (coords->square coords-1)
                      :separator "+"
@@ -121,8 +126,9 @@
                                       :square (coords->square place-coords)}))})))))
 
 (defn parse-turn [notation]
-  (let [text   (uppercase-input notation)
-        tokens (tokenize #"[A-Z][0-9]+|[A-Z]+|[0-9]+|[>+/]|\s+" text)
+  (schema/throw-violation! :string notation)
+  (let [text   (string/escape notation ascii-uppercase-map)
+        tokens (tokenize #"[A-Z][0-9]+|[A-Z]+|[0-9]+|[>+/!]|\s+" text)
         parsed (parse-turn-tokens tokens)]
     (when (= ::m/invalid parsed)
       (throw-error!
@@ -137,7 +143,7 @@
   (schema/throw-violation! :string notation)
   (if (string/blank? notation)
     []
-    (mapv parse-turn (string/split notation #"/"))))
+    (mapv parse-turn (string/split notation #"/" -1))))
 
 (defn- format-turn* [turn]
   (string/join (unparse-turn-tokens (turn->tokens turn))))
@@ -167,12 +173,12 @@
 (def parse-metadata-tokens (m/parser MetadataTokens))
 
 (def ^:private signifier->result
-  {"@" {}
-   "=" {:winner :draw}
+  {"@" nil
+   "=" :draw
    "#R" {:winner :red}
    "#B" {:winner :blue}
-   "!R" {:winner :blue :resigned :red}
-   "!B" {:winner :red :resigned :blue}})
+   "!R" {:resigned :red}
+   "!B" {:resigned :blue}})
 
 (def ^:private result->signifier
   (into {} (map (fn [[signifier result]] [result signifier])) signifier->result))
@@ -192,14 +198,17 @@
   "Parse a board snapshot. Segments are columns A onward, each from rank 1 up.
   Metadata is: signifier turn player red-prison blue-prison [blocked-square].
   Signifiers: @ active, = draw, #R/#B winner, !R/!B resigned player.
-  Resignations set :winner and :resigned without changing the turn player.
+  Terminal signifiers set :result without changing the turn player.
   Throws ExceptionInfo on invalid input."
   [notation]
-  (let [text (uppercase-input notation)
+  (schema/throw-violation! :string notation)
+  (let [text (string/escape notation ascii-uppercase-map)
         parts (re-matches #"([^@=#!]*)(@|=|[#!][RB])([^@=#!]*)" text)]
+    
     (when-not parts
       (throw-error! {:error :notation/invalid-syntax
-                     :details {:text text :expected "one @, =, #R, #B, !R, or !B signifier"}}))
+                     :details {:text text}}))
+    
     (let [[_ board-text signifier metadata-text] parts
           columns (string/split board-text #"/" -1)
           size (count columns)
@@ -209,15 +218,16 @@
       (schema/throw-violation! MetadataTokens metadata-tokens)
       (let [{:keys [turn player red-prison blue-prison blocked]}
             (:values (parse-metadata-tokens metadata-tokens))
-            game (merge (get signifier->result signifier)
-                        {:size size
-                         :turn-number (parse-long turn)
-                         :player ({"R" :red "B" :blue} player)
-                         :prison {:red (parse-long red-prison) :blue (parse-long blue-prison)}
-                         :blocked (when blocked (square->coords blocked))
-                         :next-blocked nil
-                         :version 0
-                         :board (mapv #(parse-column size %) columns)})]
+            result (get signifier->result signifier)
+            game (cond-> {:size size
+                          :turn-number (parse-long turn)
+                          :player ({"R" :red "B" :blue} player)
+                          :prison {:red (parse-long red-prison) :blue (parse-long blue-prison)}
+                          :blocked (when blocked (square->coords blocked))
+                          :next-blocked nil
+                          :version 0
+                          :board (mapv #(parse-column size %) columns)}
+                   result (assoc :result result))]
         (schema/throw-violation! schema/Game game)
         game))))
 
@@ -231,8 +241,8 @@
         (partition-by identity column))))
 
 (defn format-game
-  "Format a board snapshot, preserving :winner and :resigned in the signifier.
-  :resigned requires the opposing player as :winner. Other extra fields are omitted.
+  "Format a board snapshot, preserving :result in the signifier.
+  Other extra fields are omitted.
   Missing or false blocked coordinates normalize to nil.
   Throws ExceptionInfo on invalid input."
   [game]
@@ -240,11 +250,7 @@
   (let [{:keys [board turn-number player prison blocked] :as normalized}
         (update game :blocked #(or % nil))]
     (schema/throw-violation! schema/Game normalized)
-    (let [result (select-keys normalized [:winner :resigned])
-          signifier (get result->signifier result)]
-      (when-not signifier
-        (throw-error! {:error :notation/invalid-result
-                       :details {:result result}}))
+    (let [signifier (get result->signifier (:result normalized))]
       (str (string/join "/" (map format-column board))
            " " signifier " "
            (string/join " "
@@ -267,10 +273,10 @@
                  (assoc mssg :turn (first remaining)))
                 (rest remaining))))))
 
+
 (comment
   (format-turn (parse-turn "C10>NW>SW+E5"))
   (format-turns (parse-turns "C4/D5/B3/F5/C3>NW>NE+C6/A5+F2"))
   (format-game (parse-game "3R2B3/10/8RR/3BBB1R2/5B3R/1B8/5RB3/10/4B5/10 @ 24 B 3 0 B5"))
   (let [notation "3R2B3/10/8RR/3BBB1R2/5B3R/1B8/5RB3/10/4B5/10 @ 24 B 3 0 B5"]
-    (display/show-game (parse-game notation))
-    (format-game (parse-game notation))))
+    (display/show-game (parse-game notation))))

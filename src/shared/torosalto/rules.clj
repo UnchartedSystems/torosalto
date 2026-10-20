@@ -59,7 +59,7 @@
      [[9 2] :red] [[5 4] :blue] [[5 3] :blue]
      [[0 8] :blue]]}))
 
-(def win-game
+(def won-game
   (make-game
    {:cells
     [[[4 4] :red] [[4 3] :red] [[4 2] :red] [[4 5] :blue] [[4 6] :red]
@@ -247,16 +247,6 @@
          (reduce max 0)
          (<= 5))))
 
-(defn win [{:keys [player] :as game}]
-  (assoc game
-         :winner player
-         :next-blocked nil))
-
-(defn draw [game]
-  (assoc game
-         :winner :draw
-         :next-blocked nil))
-
 ;;;; Move Actions
 
 (defn place [{:keys [player board] :as game} coords]
@@ -299,7 +289,7 @@
            remaining directions]
       (or
        (when (win? game coords)
-         (assoc game :winner (:player game)))
+         (assoc game :result {:winner (:player game)}))
        (when (empty? remaining) game)
        (throw-error! (hop-error game coords (first remaining)))
        (recur (hop game coords (first remaining) blocked?)
@@ -309,7 +299,7 @@
   (throw-error! (place-error game coords))
   (let [game (place game coords)]
     (if (win? game coords)
-      (assoc game :winner (:player game))
+      (assoc game :result {:winner (:player game)})
       game)))
 
 (defn free-action [game {:keys [coords-1 coords-2]}]
@@ -318,18 +308,16 @@
 
 (defn hop-action [game {:keys [coords directions place-coords]}]
   (throw-error! (position-error coords (:size game)))
-  (let [{:keys [winner] :as game}
-        (evaluate-hops game coords directions)]
-    (or
-     (when winner game)
-     (when-not place-coords game)
+  (let [{:keys [result] :as game} (evaluate-hops game coords directions)]
+    (or (when result game)
+        (when-not place-coords game)
      
-     (throw-error!
-      (or (open-place-error game place-coords)
-          (when-not (<= 2 (count directions))
-            {:error :hop-action/invalid-place
-             :details {:directions directions
-                       :place-coords place-coords}})))
+        (throw-error!
+         (or (open-place-error game place-coords)
+             (when-not (<= 2 (count directions))
+               {:error :hop-action/invalid-place
+                :details {:directions directions
+                          :place-coords place-coords}})))
      
      (place game place-coords))))
 
@@ -344,26 +332,27 @@
          :blocked next-blocked
          :next-blocked nil))
 
-;; TODO: process draws!
-(defn- process-turn* [game {:keys [action details] :as turn}]
+(defn- process-turn* [{:keys [player] :as game} {:keys [action details]}]
   (schema/throw-violation! schema/Game game)
    
   (throw-error!
-   (when (:winner game)
+   (when (:result game)
      {:error :turn/game-already-ended
-      :details {:winner (:winner game)}}))
+      :details {:result (:result game)}}))
 
-  (let [{:keys [winner] :as game}
+  (let [{:keys [result] :as game}
         (case action
           :place (place-action game details)
           :free (free-action game details)
-          :hop (hop-action game details))]
+          :hop (hop-action game details)
+          :resign (assoc game :result {:resigned player}))]
 
-    (or (when winner (win game))
-        (let [next-game (next-turn game)]
-          (if (draw? next-game)
-            (draw game)
-            next-game)))))
+    (if result
+      (assoc game :next-blocked nil)
+      (let [next-game (next-turn game)]
+        (if (draw? next-game)
+          (assoc game :result :draw :next-blocked nil)
+          next-game)))))
 
 (defn process-turn [game turn]
   (try
@@ -419,3 +408,10 @@
                                   [-1 0]
                                   [0 1]]}}}))
 
+
+(comment
+  (process-message
+   {:version 0
+    :persistent? false
+    :game test-game
+    :turn {:action :resign}}))
