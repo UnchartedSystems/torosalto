@@ -5,6 +5,34 @@
 
 The purpose of this project is to create a correspondence web app, a cli app, an AI harness, and an AI benchmark for ToroSalto.
 
+## First OpenAI Response
+
+Start a fresh REPL with `clojure` after installing dependencies. Sign in with an
+eligible ChatGPT account and authorize plan usage in the browser:
+
+```clojure
+(require '[torosalto.api.openai :as openai])
+(def session (openai/login!))
+(openai/models! session)
+(def model (:id (first (openai/models! session))))
+(openai/ask! session
+             {:model model
+              :question "What is 2 + 2? Reply with only the number."})
+;; => {:text "4", :model "...", :response-id "...", :usage {...}}
+```
+
+Registration and session credentials are saved under `:openai` in the ignored
+project file `secrets.edn`, preserving other APIs' entries. Writes replace the
+file atomically with owner-only permissions. The returned session also contains
+credentials; keep it out of logs.
+
+`login!` reuses the saved session while valid and opens the browser again after
+expiry. Use `(openai/login! {:force? true})` to request a fresh sign-in. Each
+question is independent. Failed or incomplete responses throw exceptions;
+model refusals appear explicitly in the result's `:refusal` entry.
+
+Run the offline authentication and response tests with `clojure -M:test`.
+
 ## Game Rules
 
 ### Physical Setup

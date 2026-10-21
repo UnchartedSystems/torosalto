@@ -1,7 +1,7 @@
 (ns torosalto.api.codex
   (:require [clojure.string :as string]
             [clojure.java.shell :as shell]
-            [clojure.data.json :as json]))
+            [cheshire.core :as json]))
 
 (def codex-args
   ["exec" "--json"
@@ -25,13 +25,13 @@
 (let [output (apply shell/sh "codex" (conj codex-args  "-" :in "What is the capital of Algeria"))]
   (->> (string/split-lines (:out output))
        (remove string/blank?)
-       (mapv #(json/read-str % :key-fn keyword))))
+       (mapv #(json/parse-string % true))))
 
 
 (let [output (apply shell/sh "codex" (conj codex-args "resume" "01a15d50-774e-7e83-a651-63c597e99a54"  "-" :in "What question did I just ask you?"))]
   (->> (string/split-lines (:out output))
        (remove string/blank?)
-       (mapv #(json/read-str % :key-fn keyword))))
+       (mapv #(json/parse-string % true))))
 
 ;; Initial token usage for trivial questions is >6,000 tokens, even with these arguments.
 ;; Switching gears and setting up the responses API.
