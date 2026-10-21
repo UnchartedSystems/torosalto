@@ -83,6 +83,7 @@
           [:place [:? [:catn [:separator [:= "+"]] [:square Square]]]]]]
    [:resign [:catn [:token [:= "!"]]]]])
 
+(def valid-turn-tokens? (m/validator TurnTokens))
 (def parse-turn-tokens (m/parser TurnTokens))
 (def unparse-turn-tokens (m/unparser TurnTokens))
 
@@ -128,14 +129,14 @@
 (defn parse-turn [notation]
   (schema/throw-violation! :string notation)
   (let [text   (string/escape notation ascii-uppercase-map)
-        tokens (tokenize #"[A-Z][0-9]+|[A-Z]+|[0-9]+|[>+/!]|\s+" text)
-        parsed (parse-turn-tokens tokens)]
-    (when (= ::m/invalid parsed)
+        tokens (tokenize #"[A-Z][0-9]+|[A-Z]+|[0-9]+|[>+/!]|\s+" text)]
+    (when-not (valid-turn-tokens? tokens)
       (throw-error!
-       {:error :notation/invalid-syntax
-        :details {:text text
-                  :tokens tokens}}))
-    (let [turn (tokens->turn parsed)]
+       {:error :notation/invalid-turn
+        :details {:text text}}))
+    
+    (let [parsed (parse-turn-tokens tokens)
+          turn   (tokens->turn parsed)]
       (schema/throw-violation! schema/Turn turn)
       turn)))
 
@@ -258,7 +259,7 @@
                                  (:blue prison)]
                           blocked (conj (coords->square blocked))))))))
 
-(defn simulate-game [game turns]
+(defn sim-game [game turns]
   (loop [current-game game
          remaining turns
          history [game]]
@@ -267,10 +268,13 @@
       (let [next-game (rules/process-turn* current-game (first remaining))]
         (recur next-game (rest remaining) (conj history next-game))))))
 
+(defn sim-notated-game [game-note turns-note]
+  (sim-game (parse-game game-note) (parse-turns turns-note)))
+
 (comment
   (let [test-board "3R2B3/10/8RR/3BBB1R2/5B3R/1B8/5RB3/10/4B5/10 @ 24 B 3 0 B5"
         test-turns "D3/C9>SE>SW>SE>SE+G9/I3+I7/D10"
-        game-history (simulate-game (parse-game test-board) (parse-turns test-turns))]
+        game-history (sim-game (parse-game test-board) (parse-turns test-turns))]
     (mapv display/show-game game-history)
     (mapv format-game game-history)))
 
