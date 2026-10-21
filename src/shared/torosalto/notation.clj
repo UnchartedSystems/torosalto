@@ -283,4 +283,6 @@
   (format-turns (parse-turns "C4/D5/B3/F5/C3>NW>NE+C6/A5+F2"))
   (format-game (parse-game "3R2B3/10/8RR/3BBB1R2/5B3R/1B8/5RB3/10/4B5/10 @ 24 B 3 0 B5"))
   (let [notation "3R2B3/10/8RR/3BBB1R2/5B3R/1B8/5RB3/10/4B5/10 @ 24 B 3 0 B5"]
-    (display/show-game (parse-game notation))))
+    (println (display/show-game (parse-game notation))))
+  (let [notation "3R2B3/10/8RR/3BBB1R2/5B3R/1B8/5RB3/10/4B5/10 @ 24 B 3 0 B5"]
+    (println (display/llm-show-game (parse-game notation)))))
