@@ -188,19 +188,15 @@
         runs (mapv #(case % "R" :red "B" :blue (parse-long %)) tokens)
         run-schema [:vector {:min 1}
                     [:or schema/Stone [:int {:min 1 :max size}]]]]
+    
     ;; Check every run and the total width before allocating any empty cells.
     (schema/throw-violation! run-schema runs)
     (let [width (reduce + (map #(if (int? %) % 1) runs))]
       (schema/throw-violation! [:= size] width))
+    
     (vec (mapcat #(if (int? %) (repeat % :empty) [%]) runs))))
 
-(defn parse-game
-  "Parse a board snapshot. Segments are columns A onward, each from rank 1 up.
-  Metadata is: signifier turn player red-prison blue-prison [blocked-square].
-  Signifiers: @ active, = draw, #R/#B winner, !R/!B resigned player.
-  Terminal signifiers set :result without changing the turn player.
-  Throws ExceptionInfo on invalid input."
-  [notation]
+(defn parse-game [notation]
   (schema/throw-violation! :string notation)
   (let [text (string/escape notation ascii-uppercase-map)
         parts (re-matches #"([^@=#!]*)(@|=|[#!][RB])([^@=#!]*)" text)]
@@ -214,20 +210,22 @@
           size (count columns)
           metadata-tokens (if (string/blank? metadata-text)
                             [] (string/split (string/trim metadata-text) #"\s+"))]
+      
       (schema/throw-violation! (into [:enum] schema/game-sizes) size)
       (schema/throw-violation! MetadataTokens metadata-tokens)
+      
       (let [{:keys [turn player red-prison blue-prison blocked]}
             (:values (parse-metadata-tokens metadata-tokens))
             result (get signifier->result signifier)
-            game (cond-> {:size size
-                          :turn-number (parse-long turn)
-                          :player ({"R" :red "B" :blue} player)
-                          :prison {:red (parse-long red-prison) :blue (parse-long blue-prison)}
-                          :blocked (when blocked (square->coords blocked))
-                          :next-blocked nil
-                          :version 0
-                          :board (mapv #(parse-column size %) columns)}
-                   result (assoc :result result))]
+            game {:size size
+                  :turn-number (parse-long turn)
+                  :player ({"R" :red "B" :blue} player)
+                  :prison {:red (parse-long red-prison) :blue (parse-long blue-prison)}
+                  :blocked (when blocked (square->coords blocked))
+                  :next-blocked nil
+                  :result result
+                  :version 0
+                  :board (mapv #(parse-column size %) columns)}]
         (schema/throw-violation! schema/Game game)
         game))))
 
@@ -260,19 +258,21 @@
                                  (:blue prison)]
                           blocked (conj (coords->square blocked))))))))
 
-(defn simulate-game
-  ([game turns]
-   (simulate-game game false turns))
-  ([game show? turns]
-   (loop [{:keys [error] :as mssg} {:game game}
-          remaining turns]
-     (or (when error mssg)
-         (when show? (do (display/show-game (:game mssg)) nil))
-         (when (empty? remaining) mssg)
-         (recur (rules/process-message
-                 (assoc mssg :turn (first remaining)))
-                (rest remaining))))))
+(defn simulate-game [game turns]
+  (loop [current-game game
+         remaining turns
+         history [game]]
+    (if (empty? remaining)
+      history
+      (let [next-game (rules/process-turn* current-game (first remaining))]
+        (recur next-game (rest remaining) (conj history next-game))))))
 
+(comment
+  (let [test-board "3R2B3/10/8RR/3BBB1R2/5B3R/1B8/5RB3/10/4B5/10 @ 24 B 3 0 B5"
+        test-turns "D3/C9>SE>SW>SE>SE+G9/I3+I7/D10"
+        game-history (simulate-game (parse-game test-board) (parse-turns test-turns))]
+    (mapv display/show-game game-history)
+    (mapv format-game game-history)))
 
 (comment
   (format-turn (parse-turn "C10>NW>SW+E5"))

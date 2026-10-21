@@ -332,7 +332,7 @@
          :blocked next-blocked
          :next-blocked nil))
 
-(defn- process-turn* [{:keys [player] :as game} {:keys [action details]}]
+(defn process-turn* [{:keys [player] :as game} {:keys [action details]}]
   (schema/throw-violation! schema/Game game)
    
   (throw-error!
@@ -377,7 +377,7 @@
 ;; Validates Message Inputs
 (defn- message-error [mssg] nil)
 
-(defn- process-message* [{:keys [persistent? id game turn] :as mssg}]
+(defn process-message* [{:keys [persistent? id game turn] :as mssg}]
   (let [game (if persistent? (get-game id) game)
         next-game (process-turn* game turn)]
     (if persistent?

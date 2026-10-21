@@ -115,7 +115,7 @@
      [:blocked [:or coords [:enum false nil]]]
      [:next-blocked {:optional true} :nil]
      [:version [:= 0]]
-     [:result {:optional true} Result]
+     [:result {:optional true} [:maybe Result]]
      [:player Stone]
      [:prison
       [:map
