@@ -4,7 +4,9 @@
  {org.clojure/clojure
   {:mvn/version "1.12.0"}
   metosin/malli
-  {:mvn/version "0.20.2"}}
+  {:mvn/version "0.20.2"}
+  org.clojure/data.json
+  {:mvn/version "2.5.2"}}
  
 
  :aliases
@@ -16,6 +18,9 @@
   {:extra-paths ["src/server"]
    :main-opts ["=m" "torosalto.server"]}
 
+  :play
+  {:main-opts ["-X" "torosalto.cli/start"]}
+  
   :cljs
   {:extra-paths ["src/client"]
    :extra-deps
