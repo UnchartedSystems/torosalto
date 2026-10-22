@@ -3,7 +3,7 @@
 ## Single Turn Notation
 
 ### Coordinates
-In Torosalto's notation, a board coordinate is represented by a letter followed a number, such as: D1, F7 K10, B4. 
+In Torosalto's notation, a board coordinate is represented by a letter followed by a number, such as: D1, F7, K10, B4. The letter represents the column, the number represents the row. Row numbers start with 1.
 
 ### Actions
  - Place: Represented by a single coordinate, such as 'E7'.
@@ -26,7 +26,7 @@ A single column: 3R2B3
 ## The board
 The column notation represents the state of squares in that column in an ordered sequence. Numbers represent contiguous sequences of empty squares, and each R & B represent a single Red and Blue stone.
 
-A single column: 3R2B3
+A single column: 3BBB1R2
 -> [:empty :empty :empty :blue :blue :blue :empty :red :empty :empty]
 
 ## The Metadata
@@ -41,6 +41,7 @@ After the slash separated column fragments, metadata fragments provide informati
  - "!R" => Red Resigned
  - "!B" => Blue Resigned
 2) What is the turn number
+3) Which player's turn is it? (R = red, B = Blue)
 3) Number of Red Prisoners
 4) Number of Blue Prisoners
-5) Number of  Prisoners
+5) [Optional] Blocked Coordinates

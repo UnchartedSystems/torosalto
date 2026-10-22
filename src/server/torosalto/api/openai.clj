@@ -375,4 +375,4 @@
   (models! session)
   ;; Select an ID returned by models! (the first is fine for a smoke test).
   (def model (:id (first (models! session))))
-  (ask! session {:model model :question "What is 2 + 2? Reply with only the number."}))
+  (ask! session {:model model :question "What is the capital of Algeria?"}))
