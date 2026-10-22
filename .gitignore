@@ -1,3 +1,4 @@
 secrets.edn
+secrets.edn.lock
 .nrepl-port
 .cpcache/

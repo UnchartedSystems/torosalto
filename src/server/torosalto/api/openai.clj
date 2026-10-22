@@ -1,5 +1,5 @@
 (ns torosalto.api.openai
-  "Local ChatGPT-plan OAuth and independent Responses API questions."
+  "Local ChatGPT-plan OAuth and multi-turn Responses API conversations."
   (:require [buddy.sign.jwk :as jwk]
             [buddy.sign.jwt :as jwt]
             [cheshire.core :as json]
@@ -11,11 +11,16 @@
   (:import [com.sun.net.httpserver HttpExchange HttpHandler HttpServer]
            [java.io BufferedReader InputStream InputStreamReader]
            [java.net InetSocketAddress URLDecoder URLEncoder]
+           [java.nio.channels FileChannel]
            [java.nio.charset StandardCharsets]
-           [java.nio.file CopyOption Files StandardCopyOption]
+           [java.nio.file CopyOption Files StandardCopyOption StandardOpenOption]
            [java.nio.file.attribute FileAttribute PosixFilePermissions]
            [java.security MessageDigest SecureRandom]
            [java.util Base64 Timer TimerTask]))
+
+;; The vast majority of this code is temporary
+;; It exists to allow me to use the API on a plan using oauth
+;; After experimentation, when I switch to pay-as-you-go, this namespace will be rewritten.
 
 (def ^:private issuer "https://auth.openai.com")
 (def ^:private resource "https://api.openai.com/v1")
@@ -25,6 +30,11 @@
 (def ^:private request-timeout-ms 120000)
 
 (def ^:private secrets-file (io/file "secrets.edn"))
+(defonce ^:private state-lock (Object.))
+
+(def ^:private terminal-refresh-errors
+  #{"invalid_grant" "invalid_refresh_token" "token_expired" "refresh_token_expired"
+    "refresh_token_invalidated" "refresh_token_reused"})
 
 (defonce ^:private http-client
   (http/build-http-client {:connect-timeout 15000 :redirect-policy :never}))
@@ -34,6 +44,8 @@
 
 (defn- nonblank? [value]
   (and (string? value) (not (str/blank? value))))
+
+(defn- now-ms [] (System/currentTimeMillis))
 
 (defn- random-string []
   (let [bytes (byte-array 32)]
@@ -72,23 +84,39 @@
 (defn- read-state []
   (or (:openai (read-secrets)) {}))
 
+(defn- with-state-lock
+  "Serialize credential transactions, including refresh, across threads and JVMs.
+   Lock a stable sidecar because secrets.edn itself is replaced atomically."
+  [f]
+  (locking state-lock
+    (let [lock-file (io/file (str (.getCanonicalPath secrets-file) ".lock"))]
+      (io/make-parents lock-file)
+      (with-open [channel (FileChannel/open
+                           (.toPath lock-file)
+                           #{StandardOpenOption/CREATE StandardOpenOption/WRITE}
+                           (into-array FileAttribute
+                                       [(PosixFilePermissions/asFileAttribute
+                                         (PosixFilePermissions/fromString "rw-------"))]))
+                  lock (.lock channel)]
+        (f)))))
+
 (defn- save-state! [state]
-  (locking secrets-file
-    (let [saved (assoc (read-secrets) :openai state)
-          destination (.toPath (.getAbsoluteFile secrets-file))]
-      (io/make-parents secrets-file)
-      (let [temporary (Files/createTempFile
-                       (.getParent destination) ".secrets-" ".edn"
-                       (into-array FileAttribute
-                                   [(PosixFilePermissions/asFileAttribute
-                                     (PosixFilePermissions/fromString "rw-------"))]))]
-        (try
-          (spit (.toFile temporary) (pr-str saved))
-          (Files/move temporary destination
-                      (into-array CopyOption [StandardCopyOption/ATOMIC_MOVE
-                                              StandardCopyOption/REPLACE_EXISTING]))
-          (finally (Files/deleteIfExists temporary))))
-      state)))
+  ;; The caller holds with-state-lock for the entire read/modify/write transaction.
+  (let [saved (assoc (read-secrets) :openai state)
+        destination (.toPath (.getAbsoluteFile secrets-file))]
+    (io/make-parents secrets-file)
+    (let [temporary (Files/createTempFile
+                     (.getParent destination) ".secrets-" ".edn"
+                     (into-array FileAttribute
+                                 [(PosixFilePermissions/asFileAttribute
+                                   (PosixFilePermissions/fromString "rw-------"))]))]
+      (try
+        (spit (.toFile temporary) (pr-str saved))
+        (Files/move temporary destination
+                    (into-array CopyOption [StandardCopyOption/ATOMIC_MOVE
+                                            StandardCopyOption/REPLACE_EXISTING]))
+        (finally (Files/deleteIfExists temporary))))
+    state))
 
 (defn- consume-with-deadline!
   "Read a UTF-8 body before deadline-ns, closing the input to interrupt a stall.
@@ -115,28 +143,51 @@
           (if @timed-out? (fail! "OpenAI response timed out." {}) (throw error)))
         (finally (.cancel timer))))))
 
+(defn- oauth-error-code [^BufferedReader reader]
+  ;; Bound diagnostics and expose only recognized codes, never arbitrary body text.
+  (let [buffer (char-array 8193)
+        length (loop [offset 0]
+                 (if (= offset (alength buffer))
+                   offset
+                   (let [n (.read reader buffer offset (- (alength buffer) offset))]
+                     (if (neg? n) offset (recur (+ offset n))))))]
+    (when (< length (alength buffer))
+      (let [payload (try (json/parse-string (String. buffer 0 length) true)
+                         (catch Exception _ nil))
+            error (:error payload)
+            code (if (string? error) error (:code error))]
+        (when (or (terminal-refresh-errors code) (= "invalid_client" code)) code)))))
+
 (defn- request!
   "Request and consume a response within one deadline; always close its body.
    JSON is the default; a custom consumer receives a UTF-8 BufferedReader."
-  ([options] (request! options #(json/parse-stream-strict % true)))
+  ([options] (request! options (fn [reader]
+                                (try (json/parse-stream-strict reader true)
+                                     (catch Exception _
+                                       (fail! "OpenAI returned invalid JSON." {}))))))
   ([options consume-body!]
    (let [timeout-ms request-timeout-ms
          deadline-ns (+ (System/nanoTime) (* timeout-ms 1000000))
          {:keys [status headers body]}
-         (http/request
-          (merge {:accept :json} options
-                 {:http-client http-client :timeout timeout-ms :as :stream
-                  :decompress-body? false
-                  ;; Hato's status exceptions include the credential-bearing request.
-                  :throw-exceptions? false}))]
+         (try
+           (http/request
+            (merge {:accept :json} options
+                   {:http-client http-client :timeout timeout-ms :as :stream
+                    :decompress-body? false
+                    ;; Hato's status exceptions include the credential-bearing request.
+                    :throw-exceptions? false}))
+           (catch Exception _ (fail! "OpenAI HTTP transport failed." {})))]
      (with-open [input ^InputStream body]
        ;; HTTP header names are case-insensitive; Hato returns an ordinary map.
        (let [headers (update-keys headers str/lower-case)
              content-type (or (get headers "content-type") "")
              media-type (-> content-type (str/split #";" 2) first str/trim str/lower-case)]
          (when-not (<= 200 status 299)
-           (fail! "OpenAI HTTP request failed."
-                  {:status status :request-id (get headers "x-request-id")}))
+           (let [code (when (= (:url options) (str issuer "/api/accounts/oauth/token"))
+                        (consume-with-deadline! input deadline-ns oauth-error-code))]
+             (fail! "OpenAI HTTP request failed."
+                    (cond-> {:status status :request-id (get headers "x-request-id")}
+                      code (assoc :oauth-error code)))))
          ;; Some plan-backed streams omit Content-Type. The event reader still
          ;; requires response.completed before it can succeed.
          (when (and (= "text/event-stream" (:accept options))
@@ -249,66 +300,121 @@
       (fail! "ID-token authorized-party mismatch." {}))
     claims))
 
+(defn- token-session
+  "Validate a renewable token response. Identity comes from verified sign-in,
+   never from decoding the opaque access token. Refresh may omit scope."
+  [tokens subject previous-scopes started-at]
+  (let [granted (if (nil? (:scope tokens))
+                  previous-scopes
+                  (when (string? (:scope tokens))
+                    (set (str/split (:scope tokens) #"\s+"))))]
+    (when-not (and (set? granted)
+                   (every? granted ["offline_access" "resource.invoke" "chatgpt.tokens.use.direct"]))
+      (fail! "ChatGPT plan usage was not granted. Run login! and authorize it." {}))
+    (when-not (and (nonblank? (:access_token tokens))
+                   (nonblank? (:refresh_token tokens))
+                   (nonblank? (:token_type tokens))
+                   (= "bearer" (str/lower-case (:token_type tokens)))
+                   (pos-int? (:expires_in tokens)))
+      (fail! "OpenAI did not return usable renewable credentials. Run login! again." {}))
+    {:access-token (:access_token tokens)
+     :refresh-token (:refresh_token tokens)
+     :expires-at (+ started-at (* 1000 (:expires_in tokens)))
+     :scopes granted
+     :subject subject}))
+
 (defn- exchange-code!
   "Exchange browser authorization for a verified session for the saved account."
   [{:keys [code client-id redirect-uri verifier nonce]} expected-subject]
-  (let [started-at (System/currentTimeMillis)
+  (let [started-at (now-ms)
         tokens (request! {:method :post :url (str issuer "/api/accounts/oauth/token")
                           :form-params {:grant_type "authorization_code" :client_id client-id
                                         :code code :code_verifier verifier
                                         :redirect_uri redirect-uri :resource resource}})
         claims (verify-id-token! (:id_token tokens) client-id nonce)
-        subject (:sub claims)
-        granted (set (str/split (or (:scope tokens) "") #"\s+"))]
+        subject (:sub claims)]
     (when (and expected-subject (not= expected-subject subject))
       (fail! "Signed-in account differs from the saved registration." {}))
-    (when-not (every? granted ["resource.invoke" "chatgpt.tokens.use.direct"])
-      (fail! "ChatGPT plan usage was not granted. Run login! and authorize it." {}))
-    (when-not (and (nonblank? (:access_token tokens))
-                   (= "bearer" (str/lower-case (or (:token_type tokens) "")))
-                   (number? (:expires_in tokens)) (pos? (:expires_in tokens)))
-      (fail! "OpenAI did not return usable access credentials." {}))
-    {:access-token (:access_token tokens)
-     :expires-at (+ started-at (* 1000 (:expires_in tokens)))
-     :subject subject}))
+    (token-session tokens subject nil started-at)))
 
 (defn- valid-session? [session]
   (and (nonblank? (:access-token session))
        (nonblank? (:subject session))
        (number? (:expires-at session))
-       (> (:expires-at session) (+ (System/currentTimeMillis) 30000))))
+       (> (:expires-at session) (+ (now-ms) 30000))))
+
+(defn- registered-session? [{:keys [client-id subject session]}]
+  (and (nonblank? client-id) (not= "dynamic_agent_client" client-id)
+       (nonblank? subject) (= subject (:subject session))))
+
+(defn- refresh-session!
+  "The caller holds with-state-lock and has reread the latest credentials."
+  [{:keys [client-id subject session] :as saved}]
+  (let [started-at (now-ms)
+        tokens (try
+                 (request! {:method :post :url (str issuer "/api/accounts/oauth/token")
+                            :form-params {:grant_type "refresh_token" :client_id client-id
+                                          :refresh_token (:refresh-token session) :resource resource}})
+                 (catch clojure.lang.ExceptionInfo error
+                   (let [{:keys [status oauth-error] :as data} (ex-data error)]
+                     (cond
+                       (and (<= 400 (or status 0) 499) (terminal-refresh-errors oauth-error))
+                       (do (save-state! (dissoc saved :session))
+                           (fail! "OpenAI session can no longer be renewed. Run login! again."
+                                  (assoc data :reauth-required? true)))
+                       (= "invalid_client" oauth-error)
+                       (fail! "OpenAI client configuration was rejected." data)
+                       :else (throw error)))))
+        renewed (token-session tokens subject (:scopes session) started-at)]
+    (save-state! (assoc saved :session renewed))
+    renewed))
+
+(defn- current-session! [saved]
+  (when (registered-session? saved)
+    (let [session (:session saved)]
+      (cond
+        (valid-session? session) session
+        (nonblank? (:refresh-token session)) (refresh-session! saved)))))
 
 (defn login!
-  "Reuse a valid saved session, or sign in through the browser.
-   State is stored under :openai in secrets.edn. Bind the result with def;
-   it contains credentials. Use {:force? true} to request a fresh browser login."
+  "Reuse or renew the saved login, or sign in through the browser.
+   Return nonsecret {:client-id :subject} account information.
+   Credentials remain under :openai in secrets.edn. Legacy access-only logins
+   need one browser sign-in to enable renewal. Use {:force? true} to sign in again."
   ([] (login! {}))
   ([{:keys [force?]}]
-   (locking secrets-file
-     (let [saved (read-state)
-           cached-session (:session saved)]
-       (if (and (not force?) (valid-session? cached-session)
-                (= (:subject saved) (:subject cached-session)))
-         cached-session
-         (let [registration (if (:host-id saved)
-                              saved
-                              (save-state! (assoc saved :host-id (str "urn:uuid:" (random-uuid)))))
-               authorization (authorize! registration)
-               registered (save-state! (assoc registration :client-id (:client-id authorization)))
-               session (exchange-code! authorization (:subject saved))]
-           (save-state! (assoc registered :subject (:subject session) :session session))
-           session))))))
+   (with-state-lock
+     (fn []
+       (let [saved (read-state)
+             cached (when (and (not force?) (nonblank? (get-in saved [:session :refresh-token])))
+                      (try (current-session! saved)
+                           (catch clojure.lang.ExceptionInfo error
+                             (when-not (:reauth-required? (ex-data error)) (throw error)))))]
+         (when-not cached
+           (let [saved (read-state)
+                 registration (if (:host-id saved)
+                                saved
+                                (save-state! (assoc saved :host-id (str "urn:uuid:" (random-uuid)))))
+                 authorization (authorize! registration)
+                 registered (save-state! (assoc registration :client-id (:client-id authorization)))
+                 session (exchange-code! authorization (:subject saved))]
+             (save-state! (assoc registered :subject (:subject session) :session session))))
+         (select-keys (read-state) [:client-id :subject]))))))
 
-(defn- auth-headers [session]
-  (when-not (valid-session? session)
-    (fail! "Missing or expired OpenAI session. Run login! again." {}))
-  {"Authorization" (str "Bearer " (:access-token session))})
+(defn- auth-headers []
+  (with-state-lock
+    (fn []
+      (let [session (current-session! (read-state))]
+        (when-not session
+          (fail! "Missing or expired OpenAI session. Run login! again." {}))
+        {"Authorization" (str "Bearer " (:access-token session))}))))
 
 (defn models!
-  "Return this session's visible models as [{:id slug :name display-name}]."
-  [session]
+  "Return the saved account's visible models as [{:id slug :name display-name}].
+   Renew credentials automatically; run login! first if sign-in is needed."
+  []
   (let [catalog (request! {:url (str resource "/models")
-                           :headers (auth-headers session)})]
+                           :headers (auth-headers)})]
     (->> (:models catalog)
          (filter #(= "list" (:visibility %)))
          (mapv (fn [{:keys [slug display_name]}] {:id slug :name display_name})))))
@@ -352,27 +458,37 @@
                    (mapcat :content))
         text (apply str (keep #(when (= "output_text" (:type %)) (:text %)) parts))
         refusal (apply str (keep #(when (= "refusal" (:type %)) (:refusal %)) parts))]
-    (cond-> {:text text :model model :response-id id :usage usage}
+    (cond-> {:text text :model model :response-id id :usage usage :output output}
       (seq refusal) (assoc :refusal refusal))))
 
 (defn ask!
-  "Ask one independent text question with a model ID returned by models!.
-   Return {:text :model :response-id :usage} after completed inference.
-   A model refusal is returned explicitly in :refusal."
-  [session {:keys [model question]}]
+  "Ask a text question, optionally continuing a previous result's :history.
+   Return {:text :model :response-id :usage :output :history} after completion.
+   :output retains all response items, including encrypted reasoning; :history
+   contains the full exchange so far. Pass it directly to the next call.
+   Use a model supporting reasoning.context=all_turns, such as gpt-6.1-sol.
+   A model refusal is returned explicitly in :refusal.
+   Renew saved credentials automatically; run login! first if sign-in is needed."
+  [{:keys [model question history] :or {history []}}]
   (when-not (and (nonblank? model) (nonblank? question))
     (fail! "Provide nonblank :model and :question strings." {}))
-  (response-result
-   (request! {:method :post :url (str resource "/responses")
-              :headers (auth-headers session) :accept "text/event-stream" :content-type :json
-              :form-params {:model model :input [{:role "user" :content question}]
-                            :store false :stream true}}
-             await-response!)))
+  (when-not (or (nil? history) (sequential? history))
+    (fail! "Provide :history as a sequence of Responses input/output items." {}))
+  (let [input (conj (vec history) {:role "user" :content question})
+        response (request! {:method :post :url (str resource "/responses")
+                            :headers (auth-headers) :accept "text/event-stream" :content-type :json
+                            :form-params {:model model
+                                          :reasoning {:context "all_turns"}
+                                          :input input
+                                          :store false :stream true}}
+                           await-response!)]
+    (assoc (response-result response) :history (into input (:output response)))))
 
 (comment
   ;; Restart the REPL after dependency changes.
-  (def session (login!))
-  (models! session)
-  ;; Select an ID returned by models! (the first is fine for a smoke test).
-  (def model (:id (first (models! session))))
-  (ask! session {:model model :question "What is the capital of Algeria?"}))
+  (login!)
+  (models!)
+  ;; Select a visible model supporting reasoning across turns.
+  (def model "gpt-6.1-sol")
+  (def first-turn (ask! {:model model :question "Which prominent movies in the 1950s featured interracial couples?"}))
+  (ask! {:model model :history (:history first-turn) :question "I'm testing my API configuration. Can you see the original question, your full reasoning trace, and your response? You don't need to describe any of the contents of the reasoning trace, just confirm you've recieved one."}))
