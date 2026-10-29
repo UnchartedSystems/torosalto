@@ -22,24 +22,32 @@
      (when (peek ts) (println (notation/format-turn (peek ts)))))})
 
 (def models
-  {:human
+  {:cli
    (fn [input]
      (println input)
      (read-line))})
 
-(defn play-turn [games turns {:keys [model format] :as active-player} inactive-player]
-  (let [action (model (format games turns))
+(defn play-turn [states turns {:keys [model format] :as active-player} inactive-player]
+  (let [action (model (format states turns))
         turn (notation/parse-turn action)
-        next-game (rules/process-turn* (peek games) turn)]
-    (recur (conj games next-game) (conj turns turn) inactive-player active-player)))
+        {:keys [result] :as next-state} (rules/process-turn* (peek states) turn)]
+    (if result
+      
+      (recur (conj games next-state) (conj turns turn) inactive-player active-player))))
 
 (defn prep-player [{:keys [model view]}]
   {:format (view formats)
    :model (model models)})
 
-(defn start [game p1 p2]
-  (let [p1 (prep-player p1)
-        p2 (prep-player p2)]
-    (play-turn [game] [] p1 p2)))
+(defn start
+  ([initial-state p1 p2]
+   (start initial-state p1 p2 {}))
+  
+  ([initial-state p1 p2 {:keys [log]}]
+   (let [p1 (prep-player p1)
+         p2 (prep-player p2)
+         game (play-turn [initial-state] [] p1 p2)]
+     (when (fn? log)
+       (log game p1 p2)))))
 
 
